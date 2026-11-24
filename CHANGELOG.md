@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-11-24
 
 - Per-secret `[secrets.NAME]` configuration with `allowed_hosts` (exact and wildcard subdomain matching, deny by default), `expires`, and `note`, plus expiry checks in `keytwig doctor`.
 - Shell-free `keytwig_http` MCP tool and `keytwig http` CLI command with `{{NAME}}` placeholder injection, HTTPS enforcement, `allowed_hosts` checks, cross-host redirect protection, response masking, and audit logging.

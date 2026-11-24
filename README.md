@@ -19,7 +19,7 @@ threat model and reporting instructions.
   curl -fsSL https://raw.githubusercontent.com/keytwig/keytwig/main/scripts/install.sh | sh
   ```
 
-  Set `KEYTWIG_INSTALL_DIR` to override `~/.local/bin` or `KEYTWIG_VERSION` to select a tag such as `v0.1.0`.
+  Set `KEYTWIG_INSTALL_DIR` to override `~/.local/bin` or `KEYTWIG_VERSION` to select a tag such as `v0.2.0`.
 
 - Homebrew on Linux or macOS
 

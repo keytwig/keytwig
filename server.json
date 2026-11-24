@@ -3,7 +3,7 @@
   "name": "io.github.keytwig/keytwig",
   "title": "keytwig",
   "description": "Local encrypted vault for agent secrets with scoped injection and output redaction.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/keytwig/keytwig",
     "source": "github"
