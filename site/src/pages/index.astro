@@ -6,6 +6,8 @@ import SiteHeader from "@/components/SiteHeader.astro";
 import SiteFooter from "@/components/SiteFooter.astro";
 import FlowDiagram from "@/components/FlowDiagram.astro";
 import FeatureBento from "@/components/FeatureBento.astro";
+import ComparisonTable from "@/components/ComparisonTable.astro";
+import { CodeBlock } from "@/components/CodeBlock";
 import { HeroKeyBadge } from "@/components/HeroMark";
 import { QuickstartTabs } from "@/components/QuickstartTabs";
 import { TerminalShowcase } from "@/components/TerminalShowcase";
@@ -22,9 +24,34 @@ import {
   VERSION,
 } from "@/lib/site";
 
+const RELEASE_DOWNLOAD = `${REPO_URL}/releases/download/${VERSION}`;
+const GO_MOD_URL = `${REPO_URL}/blob/${VERSION}/go.mod`;
+const OG_IMAGE = `${SITE_URL}/og-image.png?v=1`;
+
 const title = "keytwig — encrypted secrets for every AI agent";
 const description =
   "One local age-encrypted vault. keytwig run injects secrets into the child process and masks them in stdout and stderr, so tool output never carries a value back to the model.";
+
+// Direct dependencies, read from go.mod at v0.1.0.
+const goDeps = [
+  ["filippo.io/age", "v1.3.2", "encryption"],
+  ["github.com/spf13/cobra", "v1.10.2", "CLI"],
+  ["github.com/BurntSushi/toml", "v1.6.0", "config.toml"],
+  ["github.com/zalando/go-keyring", "v0.2.8", "OS keyring"],
+  ["golang.org/x/term", "v0.48.0", "hidden prompt"],
+];
+// SHA-256 from checksums.txt of the v0.1.0 release.
+const checksums = [
+  ["darwin_amd64.tar.gz", "2d9c50507c715c0ede53f1fd8ff7070d07b458db924ceefee7d28d0c97ff3915"],
+  ["darwin_arm64.tar.gz", "b4614daf81b8fce6d141b31506093275892865adfd445da5e72fe6e2ba49c839"],
+  ["linux_amd64.tar.gz", "9ea93bd8ec116654205c5a924ebd2a88cdb19dd068a953ce2aba0e7ccccab604"],
+  ["linux_arm64.tar.gz", "2b1f132961f90e40049437cf0bce47a068c62f8bc56226564d41ddfd6dd29093"],
+  ["windows_amd64.zip", "01d26e0323184b87c4632d37b922e9f9c56af65c790bd34c25f40664c563da91"],
+  ["windows_arm64.zip", "347e9c660f3f55efe3cc2177b4cbb525d1cbb0492f060ef35bb6857df9d915fb"],
+];
+const verifyCode = `curl -fsSLO ${RELEASE_DOWNLOAD}/checksums.txt
+curl -fsSLO ${RELEASE_DOWNLOAD}/keytwig_0.1.0_linux_amd64.tar.gz
+sha256sum -c checksums.txt --ignore-missing`;
 
 // Straight from SECURITY.md and the README ("There is no get/set tool on purpose", "Protecting the identity").
 const protects = [
@@ -99,10 +126,16 @@ const jsonLd = {
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
 
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={OG_IMAGE} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="keytwig: Encrypted secrets for every AI agent. ‹keytwig:NAME›" />
+
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:creator" content="@toriodev" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={OG_IMAGE} />
 
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
   </head>
@@ -130,8 +163,8 @@ const jsonLd = {
           </div>
         </div>
 
-        <div id="install" class="mt-14 grid scroll-mt-24 items-start gap-6 sm:mt-16 lg:grid-cols-12">
-          <div class="min-w-0 lg:col-span-5">
+        <div id="install" class="mx-auto mt-14 grid max-w-4xl scroll-mt-24 gap-6 sm:mt-16">
+          <div class="min-w-0">
             <QuickstartTabs client:load />
             <a
               href={RELEASES_URL}
@@ -142,7 +175,7 @@ const jsonLd = {
               Prebuilt binaries for Linux, macOS, Windows · amd64 and arm64 ↗
             </a>
           </div>
-          <div class="min-w-0 lg:col-span-7">
+          <div class="min-w-0">
             <TerminalShowcase client:load />
           </div>
         </div>
@@ -161,6 +194,14 @@ const jsonLd = {
         <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl lg:text-6xl">What ships in {VERSION}</h2>
         <div class="mt-10 sm:mt-12">
           <FeatureBento />
+        </div>
+      </section>
+
+      <!-- Comparison -->
+      <section id="compare" class="mx-auto max-w-6xl scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
+        <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl lg:text-6xl">Why not .env or op run?</h2>
+        <div class="mt-10 sm:mt-12">
+          <ComparisonTable />
         </div>
       </section>
 
@@ -230,6 +271,50 @@ const jsonLd = {
             <p class="text-3xl font-light tracking-[-0.03em] text-white">Apache-2.0</p>
             <p class="mt-1 text-sm text-zinc-400">license ↗</p>
           </a>
+        </div>
+
+        <div class="mt-4 rounded-[24px] border border-white/[0.08] bg-[#18181b] p-6 sm:p-8">
+          <h3 class="text-xl font-medium text-white sm:text-2xl">Verify it yourself</h3>
+          <div class="mt-6 grid gap-8 lg:grid-cols-2">
+            <div class="min-w-0">
+              <div class="flex items-baseline justify-between gap-4">
+                <p class="font-medium text-zinc-100">5 direct Go dependencies</p>
+                <a href={GO_MOD_URL} target="_blank" rel="noreferrer" class="text-sm text-zinc-400 transition-colors hover:text-white">go.mod ↗</a>
+              </div>
+              <ul class="mt-4 divide-y divide-white/[0.06]" role="list">
+                {
+                  goDeps.map(([mod, ver, role]) => (
+                    <li class="flex items-baseline justify-between gap-4 py-2.5">
+                      <span class="code-surface min-w-0 truncate text-sm text-zinc-200">{mod}</span>
+                      <span class="flex shrink-0 items-baseline gap-3">
+                        <span class="hidden text-sm text-zinc-500 sm:inline">{role}</span>
+                        <span class="code-surface text-xs text-zinc-400">{ver}</span>
+                      </span>
+                    </li>
+                  ))
+                }
+              </ul>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-baseline justify-between gap-4">
+                <p class="font-medium text-zinc-100">SHA-256 of every release archive</p>
+                <a href={`${RELEASE_DOWNLOAD}/checksums.txt`} target="_blank" rel="noreferrer" class="shrink-0 text-sm text-zinc-400 transition-colors hover:text-white">checksums.txt ↗</a>
+              </div>
+              <ul class="mt-4 divide-y divide-white/[0.06]" role="list">
+                {
+                  checksums.map(([file, sum]) => (
+                    <li class="flex items-baseline justify-between gap-4 py-2.5">
+                      <span class="code-surface min-w-0 truncate text-sm text-zinc-200">{file}</span>
+                      <span class="code-surface shrink-0 text-xs text-zinc-400" title={sum}>{sum.slice(0, 12)}…{sum.slice(-4)}</span>
+                    </li>
+                  ))
+                }
+              </ul>
+            </div>
+          </div>
+          <div class="mt-6">
+            <CodeBlock client:visible code={verifyCode} lang="bash" title="Check an archive" meta="sh" />
+          </div>
         </div>
       </section>
 

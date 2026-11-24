@@ -1,139 +1,113 @@
 ---
 /*
- * Path of a secret, two rows of three on desktop (with an elbow from the end of row one
- * to the start of row two), one column on mobile. Amber until the redactor, mint after it.
- * Rails and travelling dots come from global.css (.rail-h / .rail-v / .rail-dot).
+ * Path of a secret. Above the line, amber: the machine side where values exist (sources, vault,
+ * entry point, child process, redactor). Below, mint: what leaves keytwig (masked output for the model,
+ * metadata for audit.jsonl). Desktop: five columns, then the boundary, then the two outputs under the
+ * node that feeds them. Mobile: one column. Rails and dots come from global.css (.rail-*).
  */
-type Node = {
-  title: string[];
-  lines: string[];
-  chips?: string[];
-  color: string;
-  outputs?: { title: string; lines: string[] }[];
-};
+type Node = { title: string[]; lines?: string[]; chips?: string[]; mask?: string };
 
-const nodes: Node[] = [
-  {
-    title: [".env", "keytwig set"],
-    lines: ["keytwig import --scan", "set reads stdin, never argv"],
-    color: "#ebb85e",
-  },
-  {
-    title: ["vault.age"],
-    lines: ["age · X25519 identity", "TPM2 systemd-creds · Keychain · DPAPI", "or --passphrase (scrypt) + unlock --ttl"],
-    color: "#ebb85e",
-  },
-  {
-    title: ["keytwig mcp --agent <harness>", "keytwig run"],
-    lines: ["[agents.<name>] allow / deny", "no get, no set tool"],
-    color: "#ebb85e",
-  },
-  {
-    title: ["child process"],
-    lines: ["-k NAME · -k VAR=NAME", "-p: the project's secrets, usual names"],
-    color: "#ebb85e",
-  },
-  {
-    title: ["stream redactor"],
-    lines: ["stdout + stderr, across write boundaries"],
-    chips: ["raw", "base64", "url", "json", "hex ≥ 8"],
-    color: "#58cc7d",
-  },
-  {
-    title: [],
-    lines: [],
-    color: "#58cc7d",
-    outputs: [
-      { title: "model", lines: ["‹keytwig:NAME›"] },
-      { title: "audit.jsonl", lines: ["0600 · metadata, zero values"] },
-    ],
-  },
+const machine: Node[] = [
+  { title: [".env", "keytwig set"], lines: ["import --scan", "stdin, never argv"] },
+  { title: ["vault.age"], lines: ["age · X25519", "TPM2 · Keychain · DPAPI", "or scrypt passphrase"] },
+  { title: ["keytwig mcp", "keytwig run"], lines: ["--agent <harness>", "allow / deny per agent"] },
+  { title: ["child process"], lines: ["env vars injected", "-k NAME · -p"] },
+  { title: ["stream redactor"], chips: ["raw", "base64", "url", "json", "hex ≥ 8"] },
 ];
 
-const GAP_X = 48; // px, lg:gap-x-12
-const HALF_Y = 28; // px, half of lg:gap-y-14
+// Outputs, with the machine column (0-based) that feeds each one and its desktop column class.
+const outputs: (Node & { from: number; colClass: string })[] = [
+  { title: ["audit.jsonl"], lines: ["0600 · metadata", "zero values"], from: 2, colClass: "lg:col-start-3" },
+  { title: ["model"], lines: ["stdout + stderr"], mask: "‹keytwig:NAME›", from: 4, colClass: "lg:col-start-5" },
+];
+
+const N = 5;
+const GAP = 32; // px, lg:gap-x-8
+const col = (i: number) => `calc((100% - ${(N - 1) * GAP}px) / ${N} * ${i + 0.5} + ${i * GAP}px)`;
+const AMBER = "#ebb85e";
+const MINT = "#58cc7d";
 ---
 
-<ol class="relative grid list-none gap-y-8 p-0 lg:grid-cols-3 lg:gap-x-12 lg:gap-y-14" role="list">
-  {
-    nodes.map((n, i) => (
-      <li class="relative min-w-0" style={`--c:${n.color}`}>
-        <div class="h-full rounded-[20px] border border-white/[0.08] bg-[#18181b] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-6">
-          {n.outputs ? (
-            <div class="grid h-full gap-3">
-              {n.outputs.map((o) => (
-                <div class="rounded-2xl border border-[#58cc7d]/20 bg-[#58cc7d]/[0.06] px-4 py-3">
-                  <p class="code-surface text-sm text-white">{o.title}</p>
-                  {o.lines.map((l) => (
-                    <p class:list={["code-surface mt-1 text-xs", l.startsWith("‹") ? "tok-mask inline-block px-1 text-[#8be3a6]" : "text-zinc-400"]}>{l}</p>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <>
-              <span class="mb-4 block size-2 rounded-full" style={`background:${n.color};box-shadow:0 0 12px ${n.color}`} aria-hidden="true" />
-              {n.title.map((t) => (
-                <p class="code-surface break-words text-[15px] leading-snug text-white">{t}</p>
-              ))}
+<div class="relative">
+  <!-- Machine side -->
+  <ol class="grid list-none gap-y-8 p-0 lg:grid-cols-5 lg:gap-x-8" role="list">
+    {
+      machine.map((n, i) => (
+        <li class="relative min-w-0">
+          <div class="h-full rounded-[20px] border border-[#ebb85e]/20 bg-[#18181b] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <span class="mb-4 block size-2 rounded-full bg-[#ebb85e] shadow-[0_0_12px_#ebb85e]" aria-hidden="true" />
+            {n.title.map((t) => (
+              <p class="code-surface text-[14px] leading-snug break-words text-white">{t}</p>
+            ))}
+            {n.lines && (
               <ul class="mt-3 space-y-1 text-sm text-zinc-400" role="list">
                 {n.lines.map((l) => (
                   <li class="break-words">{l}</li>
                 ))}
               </ul>
-              {n.chips && (
-                <div class="mt-3 flex flex-wrap gap-1.5">
-                  {n.chips.map((c) => (
-                    <span class="code-surface rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300">{c}</span>
-                  ))}
-                  <span class="code-surface tok-mask px-1.5 py-0.5 text-[11px]">→ ‹keytwig:NAME›</span>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+            )}
+            {n.chips && (
+              <div class="mt-3 flex flex-wrap gap-1.5">
+                {n.chips.map((c) => (
+                  <span class="code-surface rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300">{c}</span>
+                ))}
+              </div>
+            )}
+          </div>
 
-        {i < nodes.length - 1 && (
-          <>
-            {/* mobile: straight down to the next card */}
-            <div class="rail-v rail-on left-7 top-full h-8 lg:hidden" style={`--c:${nodes[i + 1].color};--delay:${i * 0.35}s`} aria-hidden="true">
-              <span class="rail-dot" />
-            </div>
-
-            {i % 3 !== 2 ? (
-              /* desktop: to the right, inside the row */
-              <div
-                class="rail-h rail-on top-11 hidden lg:block"
-                style={`left:100%;width:${GAP_X}px;--c:${nodes[i + 1].color};--delay:${i * 0.35}s`}
-                aria-hidden="true"
-              >
+          {i < machine.length - 1 && (
+            <>
+              <div class="rail-v rail-on left-7 top-full h-8 lg:hidden" style={`--c:${AMBER};--delay:${i * 0.4}s`} aria-hidden="true">
                 <span class="rail-dot" />
               </div>
-            ) : (
-              /* desktop: elbow from the end of row one back to the start of row two */
-              <>
-                <div class="rail-v rail-on hidden lg:block" style={`left:50%;top:100%;height:${HALF_Y}px;--delay:${i * 0.35}s`} aria-hidden="true">
-                  <span class="rail-dot" />
-                </div>
-                <div
-                  class="rail-h rail-on hidden lg:block"
-                  style={`left:calc(50% - 200% - ${GAP_X * 2}px);width:calc(200% + ${GAP_X * 2}px);top:calc(100% + ${HALF_Y}px);--delay:${i * 0.35 + 0.2}s`}
-                  aria-hidden="true"
-                >
-                  <span class="rail-dot rail-rev" />
-                </div>
-                <div
-                  class="rail-v rail-on hidden lg:block"
-                  style={`left:calc(50% - 200% - ${GAP_X * 2}px);top:calc(100% + ${HALF_Y}px);height:${HALF_Y}px;--delay:${i * 0.35 + 0.5}s`}
-                  aria-hidden="true"
-                >
-                  <span class="rail-dot" />
-                </div>
-              </>
+              <div class="rail-h rail-on top-11 hidden lg:block" style={`left:100%;width:${GAP}px;--c:${AMBER};--delay:${i * 0.4}s`} aria-hidden="true">
+                <span class="rail-dot" />
+              </div>
+            </>
+          )}
+        </li>
+      ))
+    }
+  </ol>
+
+  <!-- Trust boundary: the masked output and the audit metadata cross it, values never do -->
+  <div class="relative h-28 lg:h-32">
+    {/* mobile: one rail down the left edge, through the line */}
+    <div class="rail-v rail-on top-0 bottom-0 left-7 lg:hidden" style={`--c:${MINT};--delay:1.7s`} aria-hidden="true">
+      <span class="rail-dot" />
+    </div>
+    {/* desktop: one rail under each node that feeds an output */}
+    {
+      outputs.map((o, k) => (
+        <div class="rail-v rail-on top-0 bottom-0 hidden lg:block" style={`left:${col(o.from)};--c:${MINT};--delay:${1.7 + k * 0.3}s`} aria-hidden="true">
+          <span class="rail-dot" />
+        </div>
+      ))
+    }
+    <div class="trust-line absolute inset-x-0 top-1/2" aria-hidden="true"></div>
+    <p class="absolute top-1/2 left-14 -translate-y-1/2 rounded-full border border-[#58cc7d]/30 bg-[#141415] px-3 py-1 text-xs font-medium text-[#8be3a6] sm:text-sm lg:left-0">
+      Trust boundary — secret values never cross this line
+    </p>
+  </div>
+
+  <!-- Model side -->
+  <ul class="grid list-none gap-y-4 p-0 lg:grid-cols-5 lg:gap-x-8" role="list">
+    {
+      outputs.map((o) => (
+        <li class:list={["min-w-0", o.colClass]}>
+          <div class="h-full rounded-[20px] border border-[#58cc7d]/25 bg-[#58cc7d]/[0.05] p-5">
+            <p class="code-surface text-[14px] text-white">{o.title[0]}</p>
+            {o.mask && <p class="code-surface tok-mask mt-2 inline-block px-1 text-xs">{o.mask}</p>}
+            {o.lines && (
+              <ul class="mt-2 space-y-1 text-sm text-zinc-400" role="list">
+                {o.lines.map((l) => (
+                  <li>{l}</li>
+                ))}
+              </ul>
             )}
-          </>
-        )}
-      </li>
-    ))
-  }
-</ol>
+          </div>
+        </li>
+      ))
+    }
+  </ul>
+</div>

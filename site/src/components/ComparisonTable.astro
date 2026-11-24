@@ -1,0 +1,116 @@
+---
+/*
+ * "Why not .env or op run?" Facts checked on 2026-11-24 against the vendors' own docs (linked under the table).
+ * yes = ✓, no = —, any other string is shown as a short qualifier. Keep it honest: 1Password does ship
+ * an MCP server that never returns values, and op run does mask output.
+ */
+type Cell = "yes" | "no" | string;
+type Row = { label: string; env: Cell; op: Cell; doppler: Cell; keytwig: Cell };
+
+const rows: Row[] = [
+  { label: "Works offline, no account", env: "yes", op: "no", doppler: "no", keytwig: "yes" },
+  { label: "Encrypted at rest", env: "no", op: "yes", doppler: "yes", keytwig: "yes" },
+  { label: "Masks secrets in command output", env: "no", op: "op run", doppler: "no", keytwig: "+ base64, url, json, hex" },
+  { label: "MCP server that never returns a value", env: "no", op: "Environments MCP", doppler: "has secrets_get", keytwig: "yes" },
+  { label: "Finds and dedups scattered .env files", env: "no", op: "no", doppler: "no", keytwig: "yes" },
+  { label: "Audit log without values", env: "no", op: "cloud", doppler: "cloud", keytwig: "local" },
+];
+
+const sources = [
+  { label: "op run", href: "https://www.1password.dev/cli/reference/commands/run/" },
+  { label: "1Password Environments MCP", href: "https://www.1password.dev/environments/mcp-server" },
+  { label: "Doppler MCP server", href: "https://github.com/DopplerHQ/mcp-server" },
+  { label: "doppler run masking", href: "https://www.doppler.com/blog/remove-hardcoded-secrets-github-actions" },
+];
+
+const cols = [
+  { key: "env", label: "Plain .env" },
+  { key: "op", label: "1Password CLI" },
+  { key: "doppler", label: "Doppler CLI" },
+  { key: "keytwig", label: "keytwig" },
+] as const;
+
+const isNeg = (v: string) => v === "no" || v.startsWith("has ");
+---
+
+<div class="hidden overflow-x-auto sm:block">
+  <table class="w-full min-w-[640px] border-collapse text-left text-sm sm:text-base">
+    <thead>
+      <tr class="border-b border-white/[0.08]">
+        <th class="py-4 pr-6 font-medium text-zinc-400"><span class="sr-only">Capability</span></th>
+        {
+          cols.map((c) => (
+            <th class:list={["px-4 py-4 text-center font-medium", c.key === "keytwig" ? "text-[#ebb85e]" : "text-zinc-300"]}>{c.label}</th>
+          ))
+        }
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-white/[0.08]">
+      {
+        rows.map((r) => (
+          <tr>
+            <td class="py-4 pr-6 font-medium text-white">{r.label}</td>
+            {cols.map((c) => {
+              const v = r[c.key];
+              const k = c.key === "keytwig";
+              return (
+                <td class:list={["px-4 py-4 text-center", k && "bg-[#ebb85e]/[0.04]"]}>
+                  {v === "yes" ? (
+                    <span class:list={["font-medium", k ? "text-[#58cc7d]" : "text-zinc-200"]} aria-label="Yes">✓</span>
+                  ) : v === "no" ? (
+                    <span class="text-zinc-500" aria-label="No">—</span>
+                  ) : (
+                    <span
+                      class:list={[
+                        "inline-block rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap",
+                        k ? "bg-[#58cc7d]/12 text-[#8be3a6]" : isNeg(v) ? "bg-white/[0.04] text-zinc-500" : "bg-white/[0.06] text-zinc-300",
+                      ]}
+                    >
+                      {k && v.startsWith("+") ? `✓ ${v}` : v}
+                    </span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>
+
+<!-- Mobile: one card per capability, the four tools in a 2×2 grid -->
+<ul class="grid gap-3 sm:hidden" role="list">
+  {
+    rows.map((r) => (
+      <li class="rounded-2xl border border-white/[0.08] bg-[#18181b] p-4">
+        <p class="font-medium text-white">{r.label}</p>
+        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+          {cols.map((c) => {
+            const v = r[c.key];
+            const k = c.key === "keytwig";
+            return (
+              <div class="min-w-0">
+                <dt class:list={["truncate text-xs", k ? "text-[#ebb85e]" : "text-zinc-400"]}>{c.label.replace(" CLI", "")}</dt>
+                <dd class:list={["mt-0.5", v === "yes" ? (k ? "text-[#58cc7d]" : "text-zinc-200") : v === "no" || isNeg(v) ? "text-zinc-500" : k ? "text-[#8be3a6]" : "text-zinc-300"]}>
+                  {v === "yes" ? "✓" : v === "no" ? "—" : k && v.startsWith("+") ? "✓" : v}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </li>
+    ))
+  }
+</ul>
+
+<p class="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-500">
+  <span>Checked 2026-11-24:</span>
+  {
+    sources.map((s) => (
+      <a href={s.href} target="_blank" rel="noreferrer" class="text-zinc-400 transition-colors hover:text-white">
+        {s.label} ↗
+      </a>
+    ))
+  }
+</p>

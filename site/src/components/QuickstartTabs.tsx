@@ -23,7 +23,8 @@ const snippets: Snippet[] = [
     label: "curl",
     title: "Linux or macOS",
     lang: "bash",
-    code: `curl -fsSL https://raw.githubusercontent.com/keytwig/keytwig/main/scripts/install.sh | sh${after}`,
+    code: `curl -fsSL https://raw.githubusercontent.com/keytwig/keytwig/main/scripts/install.sh \\
+  | sh${after}`,
   },
   {
     id: "brew",

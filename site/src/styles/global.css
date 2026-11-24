@@ -213,12 +213,55 @@
   30%, 100% { top: 0; opacity: 0; }
 }
 
+/* Trust boundary in "How it works": a dashed mint line with a light that sweeps along it. */
+.trust-line {
+  height: 1px;
+  background-image:
+    linear-gradient(90deg, transparent, rgba(139, 227, 166, 0.95), transparent),
+    repeating-linear-gradient(90deg, rgba(88, 204, 125, 0.55) 0 8px, transparent 8px 14px);
+  background-size: 28% 100%, auto;
+  background-repeat: no-repeat, repeat;
+  background-position: -30% 0, 0 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .trust-line {
+    animation: trust-sweep 4.5s cubic-bezier(0.45, 0, 0.3, 1) infinite;
+  }
+}
+@keyframes trust-sweep {
+  from {
+    background-position: -30% 0, 0 0;
+  }
+  to {
+    background-position: 130% 0, 0 0;
+  }
+}
+
 /* Masked value as keytwig prints it: ‹keytwig:NAME›, mint = safe. */
 .tok-mask {
   color: #8be3a6;
   background: rgba(88, 204, 125, 0.1);
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(88, 204, 125, 0.18);
+}
+
+/* The same value without keytwig: in clear, coral = leaked. */
+.tok-leak {
+  color: #f4a493;
+  background: rgba(240, 154, 122, 0.12);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(240, 154, 122, 0.3);
+}
+.tok-leak-badge {
+  padding: 0 0.6em;
+  border-radius: 9999px;
+  border: 1px solid rgba(240, 154, 122, 0.45);
+  background: rgba(240, 154, 122, 0.1);
+  color: #f4a493;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.6;
+  vertical-align: 1px;
 }
 
 /* Terminal caret while a command is being typed. */
