@@ -29,6 +29,7 @@ func runCLI(t *testing.T, bin, home, keytwigHome, stdin string, args ...string) 
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
+		"USERPROFILE=" + home,
 		"KEYTWIG_HOME=" + keytwigHome,
 	}
 	if tmp := os.Getenv("TMPDIR"); tmp != "" {

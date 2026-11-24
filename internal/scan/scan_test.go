@@ -9,7 +9,7 @@ import (
 func TestClassifyAndDedup(t *testing.T) {
 	home := t.TempDir()
 	w := func(rel, body string) {
-		p := filepath.Join(home, rel)
+		p := filepath.Join(home, filepath.FromSlash(rel))
 		os.MkdirAll(filepath.Dir(p), 0o700)
 		os.WriteFile(p, []byte(body), 0o600)
 	}
@@ -28,7 +28,7 @@ func TestClassifyAndDedup(t *testing.T) {
 	class := map[string]string{}
 	for _, f := range rep.EnvFiles {
 		rel, _ := filepath.Rel(home, f.Path)
-		class[rel] = f.Class
+		class[filepath.ToSlash(rel)] = f.Class
 	}
 	want := map[string]string{
 		".hermes/.env": ClassHarness, ".hermes/.env.bak-1": ClassHarness,

@@ -79,6 +79,7 @@ func TestImportRefusesRestrictedFiles(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("KEYTWIG_RUNTIME_DIR", filepath.Join(dir, "run"))
 	p := vault.Paths{
 		Identity: filepath.Join(dir, "id"),

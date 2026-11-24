@@ -77,8 +77,9 @@ type Options struct {
 
 // Classify assigns a class to an env file path.
 func Classify(path string, o Options) string {
+	path = filepath.Clean(path)
 	for _, h := range o.Harness {
-		if path == h || strings.HasPrefix(path, h+string(filepath.Separator)) {
+		if pathHasPrefix(path, filepath.Clean(h)) {
 			return ClassHarness
 		}
 	}
@@ -86,11 +87,38 @@ func Classify(path string, o Options) string {
 		return ClassBackup
 	}
 	if o.Home != "" {
-		if rel, err := filepath.Rel(o.Home, path); err == nil && strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "..") {
+		home := filepath.Clean(o.Home)
+		rel, err := filepath.Rel(home, path)
+		if err != nil && runtime.GOOS == "windows" && pathHasPrefix(path, home) {
+			rel = strings.TrimPrefix(path[len(home):], string(filepath.Separator))
+			err = nil
+		}
+		if err == nil && rel != "." && strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "..") {
 			return ClassApp
 		}
 	}
 	return ClassProject
+}
+
+func pathHasPrefix(path, dir string) bool {
+	if runtime.GOOS == "windows" {
+		if strings.EqualFold(path, dir) {
+			return true
+		}
+		prefix := dir
+		if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+			prefix += string(filepath.Separator)
+		}
+		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
+	}
+	if path == dir {
+		return true
+	}
+	prefix := dir
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+	return strings.HasPrefix(path, prefix)
 }
 
 var pruneDirs = map[string]bool{

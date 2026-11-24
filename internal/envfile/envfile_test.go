@@ -3,6 +3,7 @@ package envfile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -47,8 +48,10 @@ func TestRewriteRestoreRoundTrip(t *testing.T) {
 	if !strings.Contains(got, "export DB_PASS=keytwig://SHOP__DB_PASS\n") || !strings.Contains(got, "PORT=3000\n# ") == false && !strings.Contains(got, "CHANGED=newvalue") {
 		t.Fatalf("unexpected: %q", got)
 	}
-	if st, _ := os.Stat(envPath); st.Mode().Perm() != 0o640 {
-		t.Fatal("mode not kept")
+	if runtime.GOOS != "windows" {
+		if st, _ := os.Stat(envPath); st.Mode().Perm() != 0o640 {
+			t.Fatal("mode not kept")
+		}
 	}
 	if _, err := Restore(envPath, v, true); err != nil {
 		t.Fatal(err)
