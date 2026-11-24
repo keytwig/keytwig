@@ -1,0 +1,51 @@
+---
+import { SECURITY_URL } from "@/lib/site";
+
+// Straight from SECURITY.md and the README at v0.2.0.
+const protects = [
+  ["Values in tool output", "MCP tools never return a value; keytwig run masks stdout and stderr."],
+  ["Accidental leaks", "Logs, stack traces and env dumps, also base64, URL, JSON or hex encoded, and Basic auth from *_USER / *_PASS pairs."],
+  ["API calls through a shell", "keytwig_http fills {{NAME}} without a shell, HTTPS only, only for the secret's allowed_hosts (empty denies), no cross-host redirects."],
+  ["Agents reading secret files", "The PreToolUse hook blocks direct reads of .env, vault.age, identity.txt, credential files and raw env dumps."],
+  ["File secrets left on disk", "Mounted 0600 in a 0700 directory for one command, overwritten with zeros and deleted on exit."],
+  ["A copied identity", "In machine mode a copied identity file or backup opens nowhere else."],
+  ["Agents outside their scope", "Per-agent allow / deny on what keytwig injects; aliases cannot dodge a deny."],
+  ["Silent use", "Operations are recorded in audit.jsonl as metadata, without secret values."],
+];
+const doesNot = [
+  ["Deliberate transformation", "A shell command that reverses a value or sends it elsewhere. For API calls, use keytwig_http instead of a shell."],
+  ["Same-user processes", "An agent running as your OS user can reach the vault outside its policy. Use OS-level isolation."],
+  ["Weak identity modes", "--file stores the identity in plaintext; --keyring on Linux autologin is often unencrypted (keytwig status warns)."],
+  ["Unmasked runs", "Programs started with --no-redact print values as they are."],
+  ["A lost machine", "Losing the machine or TPM loses the vault unless you exported the identity."],
+];
+const groups = [
+  { title: "Protects against", dot: "bg-[#58cc7d] shadow-[0_0_10px_#58cc7d]", items: protects },
+  { title: "Does not protect against", dot: "bg-[#f09a7a]", items: doesNot },
+];
+---
+
+<div class="grid gap-10 md:grid-cols-2 md:gap-8">
+  {
+    groups.map((g) => (
+      <section class="min-w-0">
+        <h3 class="flex items-center gap-2.5 text-base font-medium text-white sm:text-lg">
+          <span class:list={["size-2 rounded-full", g.dot]} aria-hidden="true" />
+          {g.title}
+        </h3>
+        <ul class="mt-4 divide-y divide-white/[0.06]" role="list">
+          {g.items.map(([t, d]) => (
+            <li class="py-3.5 first:pt-0">
+              <p class="font-medium text-zinc-100">{t}</p>
+              <p class="mt-1 text-sm leading-relaxed text-zinc-400">{d}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))
+  }
+</div>
+<p class="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-zinc-400">
+  <span>No telemetry. No network calls outside keytwig http.</span>
+  <a href={SECURITY_URL} target="_blank" rel="noreferrer" class="text-zinc-300 transition-colors hover:text-white">SECURITY.md ↗</a>
+</p>

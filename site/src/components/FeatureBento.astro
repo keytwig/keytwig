@@ -1,197 +1,163 @@
 ---
-// What keytwig v0.2.0 does, each with the evidence it does it: tool names, encodings, backends,
-// commands, and output recorded from the v0.2.0 binary in a sandbox with a dummy key.
-// Nothing here is roadmap; see "Not yet" in the README for that.
-// Desktop grid (3 columns): [MCP 2 | redaction 1] [hook 1 | http 2] [files 2 | machine 1] [scan 2 | setup 1] [policies 3].
-const card =
-  "flex min-w-0 flex-col rounded-[24px] border border-white/[0.08] bg-[#18181b] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-7";
-const stage = "mt-6 min-w-0 rounded-2xl border border-white/[0.06] bg-[#111113] p-4 sm:p-5";
-const h3 = "text-xl font-medium tracking-[-0.02em] text-white sm:text-2xl";
-const sub = "mt-2 max-w-md text-sm leading-relaxed text-zinc-400 sm:text-base";
-const pre = "code-surface m-0 overflow-x-auto text-xs leading-[1.8] whitespace-pre";
-const preWrap = "code-surface m-0 text-xs leading-[1.8] whitespace-pre-wrap break-words";
-
-const tools = ["keytwig_http", "keytwig_run", "keytwig_list", "keytwig_import", "keytwig_status"];
-const encodings = ["raw", "base64", "url", "json", "hex ≥ 8", "Basic *_USER:*_PASS"];
-const backends = [
-  ["Linux", "TPM2 · systemd-creds"],
-  ["macOS", "login Keychain"],
-  ["Windows", "DPAPI · Credential Manager"],
-  ["anywhere", "--passphrase · scrypt"],
-];
-const classes = [
-  ["project", true],
-  ["harness", false],
-  ["app", false],
-  ["backup", false],
-] as const;
-// `keytwig hook claude` on three tool calls: permissionDecision as returned by v0.2.0.
-const hookCases = [
-  ["Read", "~/code/shop/.env", "deny"],
-  ["Bash", "printenv", "deny"],
-  ["Bash", "ls", "allow"],
-] as const;
-const harnesses = ["claude", "codex", "cursor", "windsurf", "hermes", "grok", "antigravity"];
+// Six benefits of keytwig v0.2.0, each with one true picture of it. Commands, config,
+// MCP tools and recorded outputs live in TechDetails.astro, opened from the section's dialog.
+// Desktop (3 columns), alternating rhythm: [invisible 1 | domain 2] [local 2 | env 1] [files 1 | agents 2].
+const card = "surface relative flex min-w-0 flex-col overflow-hidden rounded-[32px]";
+const pad = "p-7 sm:p-10";
+const h3 = "text-2xl leading-tight font-medium tracking-[-0.025em] text-white sm:text-3xl";
+const sub = "mt-3 max-w-md text-base leading-relaxed text-zinc-400";
+const row = "flex items-center justify-between gap-3 rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-3";
+const agents = ["Claude Code", "Codex", "Cursor", "Windsurf", "Hermes", "Grok", "Antigravity"];
 ---
 
 <div class="grid gap-4 lg:grid-cols-3">
-  <!-- Zero-value MCP server -->
-  <article class:list={[card, "lg:col-span-2"]}>
-    <h3 class={h3}>Zero-value MCP server</h3>
-    <p class={sub}>Five tools, none returns a value. Listed on the Official MCP Registry as io.github.keytwig/keytwig.</p>
-    <div class:list={[stage, "grid gap-x-6 gap-y-2 sm:grid-cols-2"]}>
-      {
-        tools.map((t) => (
-          <p class="code-surface flex items-center gap-2.5 text-sm text-zinc-200">
-            <span class="size-1.5 shrink-0 rounded-full bg-[#58cc7d]" aria-hidden="true" />
-            {t}
-          </p>
-        ))
-      }
-      {
-        ["get", "set"].map((t) => (
-          <p class="code-surface flex items-center gap-2.5 text-sm text-zinc-500 line-through decoration-zinc-600">
-            <span class="size-1.5 shrink-0 rounded-full border border-zinc-600" aria-hidden="true" />
-            {t}
-          </p>
-        ))
-      }
+  <!-- Keys stay invisible -->
+  <article class:list={[card, pad, "justify-between gap-10"]}>
+    <div>
+      <h3 class={h3}>Keys stay invisible</h3>
+      <p class={sub}>Masked the moment they show up in output, even encoded or inside Basic auth.</p>
+    </div>
+    <div class="code-surface relative grid gap-4 rounded-3xl border border-white/[0.06] bg-[linear-gradient(160deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01))] p-5 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm" aria-hidden="true">
+      <span class="w-fit max-w-full break-all text-[#f4a493]/55 line-through decoration-[#f09a7a]/60">sk_test_demo4f9a8b7c6d5e</span>
+      <span class="tok-mask w-fit max-w-full px-2 py-1 break-all shadow-[0_0_24px_rgba(88,204,125,0.35),0_0_0_1px_rgba(88,204,125,0.3)]">‹keytwig:STRIPE_SECRET_KEY›</span>
     </div>
   </article>
 
-  <!-- Stream redaction -->
-  <article class={card}>
-    <h3 class={h3}>Stream redaction</h3>
-    <p class={sub}>Every stored value of 6+ characters, in stdout and stderr, across write boundaries.</p>
-    <div class:list={[stage, "space-y-1.5"]}>
-      {
-        encodings.map((e) => (
-          <p class="code-surface flex items-center justify-between gap-3 text-xs">
-            <span class="min-w-0 truncate text-zinc-400">{e}</span>
-            <span class="tok-mask shrink-0 px-1">‹keytwig:NAME›</span>
-          </p>
-        ))
-      }
+  <!-- Lock each key to its domain -->
+  <article class:list={[card, "lg:col-span-2 lg:min-h-[27rem] lg:justify-center"]}>
+    <img
+      src="/illustrations/bento-domain.webp"
+      alt=""
+      width="1000"
+      height="667"
+      loading="lazy"
+      decoding="async"
+      class="render relative block aspect-[3/2] h-auto w-full lg:absolute lg:top-1/2 lg:right-[-3%] lg:w-[64%] lg:-translate-y-1/2"
+    />
+    <div class:list={[pad, "relative -mt-6 flex flex-col justify-between gap-8 lg:mt-0 lg:w-[46%] lg:self-stretch"]}>
+      <div>
+        <h3 class={h3}>Lock each key to its domain</h3>
+        <p class={sub}>Your Stripe key only ever goes to Stripe. API calls run without a shell.</p>
+      </div>
+      <ul class="grid gap-2.5 text-sm" role="list">
+        <li class={row}>
+          <span class="code-surface truncate text-zinc-200">api.stripe.com</span>
+          <span class="shrink-0 font-medium text-[#8be3a6]">Allowed</span>
+        </li>
+        <li class={row}>
+          <span class="code-surface truncate text-zinc-200">example.com</span>
+          <span class="shrink-0 font-medium text-[#f4a493]">Refused</span>
+        </li>
+      </ul>
     </div>
   </article>
 
-  <!-- PreToolUse guard -->
-  <article class={card}>
-    <h3 class={h3}>PreToolUse guard</h3>
-    <p class={sub}>Blocks direct reads of .env, vault, identity and credential files, and raw env dumps.</p>
-    <dl class:list={[stage, "space-y-2.5"]}>
-      {
-        hookCases.map(([tool, arg, decision]) => (
-          <div class="flex items-baseline justify-between gap-3 text-xs">
-            <dt class="code-surface min-w-0 truncate">
-              <span class="text-zinc-500">{tool}</span> <span class="text-zinc-200">{arg}</span>
-            </dt>
-            <dd class:list={["code-surface shrink-0", decision === "deny" ? "tok-leak px-1" : "tok-mask px-1"]}>{decision}</dd>
-          </div>
-        ))
-      }
-    </dl>
-    <p class="mt-4 text-sm text-zinc-400">Claude Code by default (--no-hooks to skip) · Cursor with keytwig hook cursor</p>
-  </article>
-
-  <!-- Shell-free HTTP with a host allowlist -->
-  <article class:list={[card, "lg:col-span-2"]}>
-    <h3 class={h3}>Shell-free HTTP, per-secret hosts</h3>
-    <p class={sub}>keytwig_http fills {"{{NAME}}"} without a shell. HTTPS only, cross-host redirects refused, response masked.</p>
-    <div class:list={[stage, "grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)]"]}>
-      <pre class={pre}><code><span class="tok-sec">[secrets.STRIPE_SECRET_KEY]</span>
-<span class="tok-key">allowed_hosts</span> <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"api.stripe.com"</span><span class="tok-punct">]</span>
-<span class="tok-key">expires</span> <span class="tok-punct">=</span> <span class="tok-str">"2026-12-31"</span>
-<span class="tok-com"># no allowed_hosts = denied</span></code></pre>
-      <pre class={preWrap}><code><span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">http GET https://example.com/</span> <span class="text-zinc-200">\</span>
-  <span class="tok-flag">-H</span> <span class="text-zinc-200">'Authorization: Bearer {"{{STRIPE_SECRET_KEY}}"}'</span>
-<span class="tok-leak px-0.5">keytwig: secret STRIPE_SECRET_KEY is not allowed for host "example.com"</span></code></pre>
-    </div>
-  </article>
-
-  <!-- File-backed secrets -->
-  <article class:list={[card, "lg:col-span-2"]}>
-    <h3 class={h3}>File secrets</h3>
-    <p class={sub}>Service-account JSON or PEM keys, mounted 0600 for one run, then zeroed and deleted.</p>
-    <div class={stage}>
-      <pre class={pre}><code><span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">set GCP_SA</span> <span class="tok-flag">--file</span> <span class="text-zinc-200">sa.json</span>
-<span class="text-zinc-400">GCP_SA added [file]</span>
-<span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">run</span> <span class="tok-flag">--file-key</span> <span class="text-zinc-200">SA=GCP_SA -- ./deploy.sh</span>
-<span class="tok-com"># $SA → $XDG_RUNTIME_DIR/keytwig-mount-…/f0/sa.json</span></code></pre>
-    </div>
-  </article>
-
-  <!-- Machine-bound at rest -->
-  <article class={card}>
-    <h3 class={h3}>Machine-bound at rest</h3>
-    <p class={sub}>The age identity is sealed to this machine. A copied file or backup opens nowhere else.</p>
-    <dl class:list={[stage, "space-y-2.5"]}>
-      {
-        backends.map(([os, how]) => (
-          <div class="flex items-baseline justify-between gap-3 text-sm">
-            <dt class="text-zinc-400">{os}</dt>
-            <dd class="code-surface truncate text-right text-xs text-zinc-200">{how}</dd>
-          </div>
-        ))
-      }
-    </dl>
-  </article>
-
-  <!-- Scan, dedup, project links -->
-  <article class:list={[card, "lg:col-span-2"]}>
-    <h3 class={h3}>Scan, dedup, project links</h3>
-    <p class={sub}>Only project .env files are imported. Same value, different names: stored once as aliases.</p>
-    <div class:list={[stage, "space-y-4"]}>
-      <div class="flex flex-wrap gap-1.5">
+  <!-- Local, encrypted, zero cloud -->
+  <article class:list={[card, "lg:col-span-2 lg:min-h-[27rem] lg:justify-center"]}>
+    <img
+      src="/illustrations/bento-local.webp"
+      alt=""
+      width="1000"
+      height="667"
+      loading="lazy"
+      decoding="async"
+      class="render relative block aspect-[3/2] h-auto w-full lg:absolute lg:top-1/2 lg:left-[-3%] lg:w-[64%] lg:-translate-y-1/2"
+    />
+    <div class:list={[pad, "relative -mt-6 flex flex-col justify-between gap-8 lg:mt-0 lg:ml-auto lg:w-[46%] lg:self-stretch"]}>
+      <div>
+        <h3 class={h3}>Local, encrypted, zero cloud</h3>
+        <p class={sub}>One vault on your machine, bound to it by default.</p>
+      </div>
+      <dl class="grid gap-2.5 text-sm">
         {
-          classes.map(([c, on]) => (
-            <span
-              class:list={[
-                "code-surface rounded-md px-2 py-0.5 text-xs",
-                on ? "bg-[#ebb85e]/15 text-[#ebb85e]" : "bg-white/[0.04] text-zinc-500",
-              ]}
-            >
-              {c}
-            </span>
+          ["Account", "Subscription", "Telemetry"].map((t) => (
+            <div class={row}>
+              <dt class="truncate text-zinc-200">{t}</dt>
+              <dd class="shrink-0 font-medium text-[#8be3a6]">None</dd>
+            </div>
           ))
         }
-      </div>
-      <pre class={pre}><code><span class="tok-com"># keytwig rewrite --scan --apply</span>
-<span class="tok-del">- STRIPE_SECRET_KEY=••••••••••••</span>
-<span class="tok-add">+ STRIPE_SECRET_KEY=keytwig://STRIPE_SECRET_KEY</span>
-<span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">run</span> <span class="tok-flag">-p</span> <span class="text-zinc-200">-- npm run dev</span></code></pre>
+      </dl>
     </div>
   </article>
 
-  <!-- One-command harness setup -->
-  <article class={card}>
-    <h3 class={h3}>One-command harness setup</h3>
-    <p class={sub}>Registers keytwig mcp --agent &lt;harness&gt; (config backed up as *.keytwig.bak) and the PreToolUse hook on Claude Code; --no-hooks skips it.</p>
-    <div class:list={[stage, "space-y-3"]}>
-      <div class="flex flex-wrap gap-1.5">
-        {harnesses.map((h) => <span class="code-surface rounded-md bg-white/[0.04] px-2 py-0.5 text-xs text-zinc-300">{h}</span>)}
-      </div>
-      <pre class={pre}><code><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">install all</span>
-<span class="tok-cmd">keytwig</span> <span class="text-zinc-200">doctor</span>
-<span class="tok-cmd">keytwig</span> <span class="text-zinc-200">uninstall</span> <span class="tok-var">&lt;harness|all&gt;</span></code></pre>
+  <!-- Blocks agents from reading .env -->
+  <article class:list={[card, pad, "justify-between gap-10"]}>
+    <div>
+      <svg viewBox="0 0 64 72" class="mb-8 h-[72px] w-16 drop-shadow-[0_0_18px_rgba(88,204,125,0.35)]" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="shield-rim" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#f3d79c" />
+            <stop offset="0.45" stop-color="#ebb85e" />
+            <stop offset="1" stop-color="#7a5a24" />
+          </linearGradient>
+          <linearGradient id="shield-face" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2a2a2f" />
+            <stop offset="1" stop-color="#121214" />
+          </linearGradient>
+        </defs>
+        <path d="M32 3 59 13v20c0 17-11.5 30-27 36C16.5 63 5 50 5 33V13L32 3Z" fill="url(#shield-face)" stroke="url(#shield-rim)" stroke-width="2.5" stroke-linejoin="round" />
+        <path d="M32 11 51 18v15c0 12.5-8 22.5-19 27-11-4.5-19-14.5-19-27V18l19-7Z" stroke="#58cc7d" stroke-opacity="0.35" stroke-width="1" />
+        <circle cx="32" cy="30" r="6" fill="#58cc7d" fill-opacity="0.9" />
+        <path d="M29.5 34h5l1.5 11h-8l1.5-11Z" fill="#58cc7d" fill-opacity="0.9" />
+      </svg>
+      <h3 class={h3}>Blocks agents from reading .env</h3>
+      <p class={sub}>Claude Code and Cursor are stopped before they open a secret file or dump the environment.</p>
     </div>
+    <ul class="grid gap-2.5 text-sm" role="list">
+      {
+        [".env", "printenv"].map((t) => (
+          <li class={row}>
+            <span class="code-surface truncate text-zinc-200">{t}</span>
+            <span class="shrink-0 font-medium text-[#f4a493]">Blocked</span>
+          </li>
+        ))
+      }
+    </ul>
   </article>
 
-  <!-- Per-agent policies + audit log -->
-  <article class:list={[card, "lg:col-span-3"]}>
-    <h3 class={h3}>Per-agent policies, local audit log</h3>
-    <p class:list={[sub, "max-w-2xl"]}>Deny wins and aliases cannot dodge it. Every run lands in audit.jsonl, without values.</p>
-    <div class:list={[stage, "grid gap-4 sm:grid-cols-2"]}>
-      <pre class={pre}><code><span class="tok-sec">[agents.hermes]</span>
-<span class="tok-key">allow</span> <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"ACME_*"</span><span class="tok-punct">,</span> <span class="tok-str">"STRIPE_*"</span><span class="tok-punct">]</span>
-<span class="tok-key">deny</span>  <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"*_PROD"</span><span class="tok-punct">]</span>
-
-<span class="tok-sec">[agents.default]</span>
-<span class="tok-key">deny</span> <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"STRIPE_*"</span><span class="tok-punct">]</span></code></pre>
-      <pre class={pre}><code><span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">log</span> <span class="tok-flag">--agent</span> <span class="text-zinc-200">hermes</span>
-<span class="text-zinc-500">MODE  AGENT   EXIT  INJECTED</span>
-<span class="text-zinc-300">cli   hermes  0     STRIPE_SECRET_KEY</span></code></pre>
+  <!-- Secret files never linger on disk -->
+  <article class:list={[card, pad, "justify-between gap-10"]}>
+    <div>
+      <h3 class={h3}>Secret files never linger on disk</h3>
+      <p class={sub}>Service-account JSON and PEM keys exist for one run, then they are wiped.</p>
     </div>
+    <ol class="grid gap-2.5 text-sm" role="list">
+      <li class={row}>
+        <span class="code-surface truncate text-[#ebb85e]">sa.json</span>
+        <span class="shrink-0 text-zinc-400">Encrypted</span>
+      </li>
+      <li class={row}>
+        <span class="truncate text-zinc-200">During the run</span>
+        <span class="shrink-0 text-zinc-400">Mounted</span>
+      </li>
+      <li class={row}>
+        <span class="truncate text-zinc-200">After</span>
+        <span class="shrink-0 font-medium text-[#8be3a6]">Wiped</span>
+      </li>
+    </ol>
   </article>
 
+  <!-- One setup, every coding agent -->
+  <article class:list={[card, pad, "justify-between gap-10 lg:col-span-2"]}>
+    <div>
+      <h3 class={h3}>One setup, every coding agent</h3>
+      <p class={sub}>One command connects them all.</p>
+    </div>
+    <div class="grid gap-6">
+      <ul class="flex flex-wrap gap-2.5" role="list">
+        {
+          agents.map((a) => (
+            <li class="inline-flex items-center gap-2.5 rounded-full border border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] py-2 pr-4 pl-3 text-sm font-medium text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:text-base">
+              <span class="size-2 rounded-full bg-[#58cc7d] shadow-[0_0_8px_#58cc7d]" aria-hidden="true" />
+              {a}
+            </li>
+          ))
+        }
+      </ul>
+      <p class="code-surface w-fit rounded-xl border border-white/[0.06] bg-[#111113] px-4 py-2.5 text-sm text-zinc-300">
+        <span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> install all
+      </p>
+    </div>
+  </article>
 </div>
