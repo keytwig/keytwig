@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-24
 
 - Local age-encrypted vault with machine-bound, passphrase, keyring, and file identity modes, plus identity export and import.
 - Secret discovery and import from project env files, with aliases and project-specific mappings.
