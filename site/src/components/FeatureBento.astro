@@ -1,0 +1,140 @@
+---
+// The six things keytwig v0.1.0 does, each with the evidence it does it: tool names,
+// encodings, backends, commands. Nothing here is roadmap; see "Not yet" in the README for that.
+const card =
+  "flex min-w-0 flex-col rounded-[24px] border border-white/[0.08] bg-[#18181b] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:p-7";
+const stage = "mt-6 min-w-0 rounded-2xl border border-white/[0.06] bg-[#111113] p-4 sm:p-5";
+const h3 = "text-xl font-medium tracking-[-0.02em] text-white sm:text-2xl";
+const sub = "mt-2 max-w-md text-sm leading-relaxed text-zinc-400 sm:text-base";
+
+const tools = ["keytwig_run", "keytwig_list", "keytwig_import", "keytwig_status"];
+const encodings = ["raw", "base64", "url", "json", "hex ≥ 8"];
+const backends = [
+  ["Linux", "TPM2 · systemd-creds"],
+  ["macOS", "login Keychain"],
+  ["Windows", "DPAPI · Credential Manager"],
+  ["anywhere", "--passphrase · scrypt"],
+];
+const classes = [
+  ["project", true],
+  ["harness", false],
+  ["app", false],
+  ["backup", false],
+] as const;
+const harnesses = ["claude", "codex", "cursor", "windsurf", "hermes", "grok", "antigravity"];
+---
+
+<div class="grid gap-4 lg:grid-cols-3">
+  <!-- 1. Zero-value MCP server -->
+  <article class:list={[card, "lg:col-span-2"]}>
+    <h3 class={h3}>Zero-value MCP server</h3>
+    <p class={sub}>Four tools, none returns a value. Listed on the Official MCP Registry as io.github.keytwig/keytwig.</p>
+    <div class:list={[stage, "grid gap-x-6 gap-y-2 sm:grid-cols-2"]}>
+      {
+        tools.map((t) => (
+          <p class="code-surface flex items-center gap-2.5 text-sm text-zinc-200">
+            <span class="size-1.5 shrink-0 rounded-full bg-[#58cc7d]" aria-hidden="true" />
+            {t}
+          </p>
+        ))
+      }
+      {
+        ["get", "set"].map((t) => (
+          <p class="code-surface flex items-center gap-2.5 text-sm text-zinc-500 line-through decoration-zinc-600">
+            <span class="size-1.5 shrink-0 rounded-full border border-zinc-600" aria-hidden="true" />
+            {t}
+          </p>
+        ))
+      }
+    </div>
+  </article>
+
+  <!-- 2. Stream redaction -->
+  <article class={card}>
+    <h3 class={h3}>Stream redaction</h3>
+    <p class={sub}>Every stored value of 6+ characters, in stdout and stderr, across write boundaries.</p>
+    <div class:list={[stage, "space-y-1.5"]}>
+      {
+        encodings.map((e) => (
+          <p class="code-surface flex items-center justify-between gap-3 text-xs">
+            <span class="text-zinc-400">{e}</span>
+            <span class="tok-mask truncate px-1">‹keytwig:NAME›</span>
+          </p>
+        ))
+      }
+    </div>
+  </article>
+
+  <!-- 3. Machine-bound at rest -->
+  <article class={card}>
+    <h3 class={h3}>Machine-bound at rest</h3>
+    <p class={sub}>The age identity is sealed to this machine. A copied file or backup opens nowhere else.</p>
+    <dl class:list={[stage, "space-y-2.5"]}>
+      {
+        backends.map(([os, how]) => (
+          <div class="flex items-baseline justify-between gap-3 text-sm">
+            <dt class="text-zinc-400">{os}</dt>
+            <dd class="code-surface truncate text-right text-xs text-zinc-200">{how}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </article>
+
+  <!-- 4. Scan, dedup, project links -->
+  <article class:list={[card, "lg:col-span-2"]}>
+    <h3 class={h3}>Scan, dedup, project links</h3>
+    <p class={sub}>Only project .env files are imported. Same value, different names: stored once as aliases.</p>
+    <div class:list={[stage, "space-y-4"]}>
+      <div class="flex flex-wrap gap-1.5">
+        {
+          classes.map(([c, on]) => (
+            <span
+              class:list={[
+                "code-surface rounded-md px-2 py-0.5 text-xs",
+                on ? "bg-[#ebb85e]/15 text-[#ebb85e]" : "bg-white/[0.04] text-zinc-500",
+              ]}
+            >
+              {c}
+            </span>
+          ))
+        }
+      </div>
+      <pre class="code-surface m-0 overflow-x-auto text-xs leading-[1.8] whitespace-pre"><code><span class="tok-com"># keytwig rewrite --scan --apply</span>
+<span class="tok-del">- STRIPE_SECRET_KEY=••••••••••••</span>
+<span class="tok-add">+ STRIPE_SECRET_KEY=keytwig://STRIPE_SECRET_KEY</span>
+<span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">run</span> <span class="tok-flag">-p</span> <span class="text-zinc-200">-- npm run dev</span></code></pre>
+    </div>
+  </article>
+
+  <!-- 5. Per-agent policies + audit log -->
+  <article class:list={[card, "lg:col-span-2"]}>
+    <h3 class={h3}>Per-agent policies, local audit log</h3>
+    <p class={sub}>Deny wins and aliases cannot dodge it. Every run lands in audit.jsonl, without values.</p>
+    <div class:list={[stage, "grid gap-4 sm:grid-cols-2"]}>
+      <pre class="code-surface m-0 overflow-x-auto text-xs leading-[1.8] whitespace-pre"><code><span class="tok-sec">[agents.hermes]</span>
+<span class="tok-key">allow</span> <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"ACME_*"</span><span class="tok-punct">,</span> <span class="tok-str">"STRIPE_*"</span><span class="tok-punct">]</span>
+<span class="tok-key">deny</span>  <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"*_PROD"</span><span class="tok-punct">]</span>
+
+<span class="tok-sec">[agents.default]</span>
+<span class="tok-key">deny</span> <span class="tok-punct">=</span> <span class="tok-punct">[</span><span class="tok-str">"STRIPE_*"</span><span class="tok-punct">]</span></code></pre>
+      <pre class="code-surface m-0 overflow-x-auto text-xs leading-[1.8] whitespace-pre"><code><span class="text-zinc-500">$ </span><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">log</span> <span class="tok-flag">--agent</span> <span class="text-zinc-200">hermes</span>
+<span class="text-zinc-500">MODE  AGENT   EXIT  INJECTED</span>
+<span class="text-zinc-300">cli   hermes  0     STRIPE_SECRET_KEY</span></code></pre>
+    </div>
+  </article>
+
+  <!-- 6. One-command harness setup -->
+  <article class={card}>
+    <h3 class={h3}>One-command harness setup</h3>
+    <p class={sub}>Registers keytwig mcp --agent &lt;harness&gt;, with a *.keytwig.bak backup of each config.</p>
+    <div class:list={[stage, "space-y-3"]}>
+      <div class="flex flex-wrap gap-1.5">
+        {harnesses.map((h) => <span class="code-surface rounded-md bg-white/[0.04] px-2 py-0.5 text-xs text-zinc-300">{h}</span>)}
+      </div>
+      <pre class="code-surface m-0 overflow-x-auto text-xs leading-[1.8] whitespace-pre"><code><span class="tok-cmd">keytwig</span> <span class="text-zinc-200">install all</span>
+<span class="tok-cmd">keytwig</span> <span class="text-zinc-200">doctor</span>
+<span class="tok-cmd">keytwig</span> <span class="text-zinc-200">uninstall</span> <span class="tok-var">&lt;harness|all&gt;</span></code></pre>
+    </div>
+  </article>
+</div>

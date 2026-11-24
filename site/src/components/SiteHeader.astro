@@ -1,0 +1,69 @@
+---
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { MobileNav } from "@/components/MobileNav";
+import { MEMTWIG_URL, REPO_URL, VERSION } from "@/lib/site";
+
+interface Props {
+  currentPath?: string;
+}
+
+const { currentPath = "/" } = Astro.props;
+const base = currentPath === "/" ? "" : "/";
+
+const navLinks = [
+  { href: `${base}#how`, label: "How it works" },
+  { href: `${base}#security`, label: "Security" },
+  { href: `${base}#install`, label: "Install" },
+];
+---
+
+<header class="pointer-events-none sticky top-0 z-50 pt-4 pb-2">
+  <div class="pointer-events-auto mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
+    <a
+      href="/"
+      class="flex items-center gap-2.5 rounded-full border border-white/10 bg-[#18181b]/85 px-3 py-1.5 text-base font-semibold tracking-tight text-white backdrop-blur-xl"
+    >
+      <img src="/favicon.svg" alt="" width="28" height="28" class="rounded-lg shadow-[0_4px_16px_rgba(235,184,94,0.26)]" />
+      <span>keytwig</span>
+    </a>
+
+    <nav
+      aria-label="Primary"
+      class="hidden items-center gap-1 rounded-full border border-white/10 bg-[#1d1d20]/85 px-2 py-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:flex"
+    >
+      {navLinks.map((item) => (
+        <a
+          href={item.href}
+          class="rounded-full px-3.5 py-1.5 text-sm font-medium text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+        >
+          {item.label}
+        </a>
+      ))}
+      <span class="mx-1 h-4 w-px bg-white/10" aria-hidden="true"></span>
+      <a
+        href={MEMTWIG_URL}
+        class="rounded-full px-3.5 py-1.5 text-sm font-medium text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+      >
+        memtwig
+      </a>
+    </nav>
+
+    <div class="hidden items-center gap-2.5 lg:flex">
+      <a href={REPO_URL} target="_blank" rel="noreferrer" class={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-2 bg-[#1d1d20]/85 backdrop-blur-xl hover:bg-[#26262a]/90")}>
+        GitHub
+        <span class="text-xs text-zinc-400 tabular-nums">{VERSION}</span>
+      </a>
+      <a
+        href={`${base}#install`}
+        class={cn(buttonVariants({ variant: "default", size: "sm" }), "shadow-[0_0_28px_rgba(235,184,94,0.28)]")}
+      >
+        Install
+      </a>
+    </div>
+
+    <div class="lg:hidden">
+      <MobileNav client:media="(max-width: 1023px)" currentPath={currentPath} />
+    </div>
+  </div>
+</header>

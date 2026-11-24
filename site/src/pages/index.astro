@@ -1,0 +1,266 @@
+---
+import "@/styles/global.css";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import SiteHeader from "@/components/SiteHeader.astro";
+import SiteFooter from "@/components/SiteFooter.astro";
+import FlowDiagram from "@/components/FlowDiagram.astro";
+import FeatureBento from "@/components/FeatureBento.astro";
+import { HeroKeyBadge } from "@/components/HeroMark";
+import { QuickstartTabs } from "@/components/QuickstartTabs";
+import { TerminalShowcase } from "@/components/TerminalShowcase";
+import { AgentPromptBox } from "@/components/AgentPromptBox";
+import {
+  LICENSE_URL,
+  MEMTWIG_URL,
+  RELEASE_DATE,
+  RELEASE_URL,
+  RELEASES_URL,
+  REPO_URL,
+  SECURITY_URL,
+  SITE_URL,
+  VERSION,
+} from "@/lib/site";
+
+const title = "keytwig — encrypted secrets for every AI agent";
+const description =
+  "One local age-encrypted vault. keytwig run injects secrets into the child process and masks them in stdout and stderr, so tool output never carries a value back to the model.";
+
+// Straight from SECURITY.md and the README ("There is no get/set tool on purpose", "Protecting the identity").
+const protects = [
+  ["Values in tool output", "MCP tools never return a value; keytwig run masks stdout and stderr."],
+  ["Accidental leaks", "Logs, stack traces and env dumps, also base64, URL, JSON or hex encoded."],
+  ["A copied identity", "In machine mode a copied identity file or backup opens nowhere else."],
+  ["Agents outside their scope", "Per-agent allow / deny on what keytwig injects; aliases cannot dodge a deny."],
+  ["Silent use", "Operations are recorded in audit.jsonl as metadata, without secret values."],
+];
+const doesNot = [
+  ["Deliberate transformation", "A command that reverses a value or sends it elsewhere before printing."],
+  ["Same-user processes", "An agent running as your OS user can reach the vault outside its policy. Use OS-level isolation."],
+  ["Weak identity modes", "--file stores the identity in plaintext; --keyring on Linux autologin is often unencrypted (keytwig status warns)."],
+  ["Unmasked runs", "Programs started with --no-redact print values as they are."],
+  ["A lost machine", "Losing the machine or TPM loses the vault unless you exported the identity."],
+];
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      url: `${SITE_URL}/`,
+      name: "keytwig",
+      description,
+      inLanguage: "en",
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${SITE_URL}/#software`,
+      name: "keytwig",
+      url: `${SITE_URL}/`,
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Linux, macOS, Windows",
+      softwareVersion: VERSION.slice(1),
+      datePublished: RELEASE_DATE,
+      dateModified: RELEASE_DATE,
+      license: "https://www.apache.org/licenses/LICENSE-2.0",
+      codeRepository: REPO_URL,
+      downloadUrl: RELEASE_URL,
+      description,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      isRelatedTo: { "@type": "SoftwareApplication", name: "memtwig", url: MEMTWIG_URL },
+      author: {
+        "@type": "Person",
+        "@id": "https://vittoriocompagno.com/#person",
+        name: "Vittorio Compagno",
+        url: "https://vittoriocompagno.com",
+        sameAs: ["https://github.com/vittoriocompagno", "https://x.com/toriodev", "https://www.linkedin.com/in/vittorio-compagno"],
+      },
+    },
+  ],
+};
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={`${SITE_URL}/`} />
+    <link rel="alternate" type="text/markdown" href={`${SITE_URL}/llms.txt`} title="LLMs summary" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#141415" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="keytwig" />
+    <meta property="og:url" content={`${SITE_URL}/`} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:creator" content="@toriodev" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  </head>
+  <body class="relative min-h-screen bg-background text-foreground">
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-[560px] overflow-hidden" aria-hidden="true">
+      <div class="hero-beam absolute -top-36 right-[-8%] h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle_at_center,rgba(235,184,94,0.17)_0%,rgba(88,204,125,0.08)_42%,transparent_72%)] blur-3xl"></div>
+    </div>
+
+    <SiteHeader currentPath="/" />
+
+    <main>
+      <!-- Hero: claim, then install and a real session side by side -->
+      <section class="mx-auto max-w-6xl px-5 pt-16 pb-20 sm:px-8 sm:pt-24 sm:pb-24">
+        <div class="mx-auto max-w-4xl text-center">
+          <h1 class="text-5xl leading-[1.02] font-medium tracking-[-0.04em] text-balance text-white sm:text-7xl xl:text-[5.25rem]">
+            Encrypted <HeroKeyBadge client:load /> secrets<br />for every AI agent.
+          </h1>
+          <p class="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-zinc-400 sm:text-xl">
+            One local vault, age X25519. <code class="code-surface text-[0.9em] text-zinc-200">keytwig run</code> injects values into the child process and masks
+            them in stdout and stderr as <code class="code-surface tok-mask px-1 text-[0.85em]">‹keytwig:NAME›</code>, so the model never reads them back.
+          </p>
+          <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
+            <a href="#install" class={cn(buttonVariants({ variant: "default", size: "lg" }))}>Install {VERSION}</a>
+            <a href={REPO_URL} target="_blank" rel="noreferrer" class={cn(buttonVariants({ variant: "outline", size: "lg" }))}>GitHub</a>
+          </div>
+        </div>
+
+        <div id="install" class="mt-14 grid scroll-mt-24 items-start gap-6 sm:mt-16 lg:grid-cols-12">
+          <div class="min-w-0 lg:col-span-5">
+            <QuickstartTabs client:load />
+            <a
+              href={RELEASES_URL}
+              target="_blank"
+              rel="noreferrer"
+              class="mt-4 inline-flex text-sm font-medium text-zinc-400 transition-colors hover:text-white"
+            >
+              Prebuilt binaries for Linux, macOS, Windows · amd64 and arm64 ↗
+            </a>
+          </div>
+          <div class="min-w-0 lg:col-span-7">
+            <TerminalShowcase client:load />
+          </div>
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section id="how" class="mx-auto max-w-6xl scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
+        <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl lg:text-6xl">How it works</h2>
+        <div class="mt-10 sm:mt-12">
+          <FlowDiagram />
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section id="features" class="mx-auto max-w-6xl scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
+        <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl lg:text-6xl">What ships in {VERSION}</h2>
+        <div class="mt-10 sm:mt-12">
+          <FeatureBento />
+        </div>
+      </section>
+
+      <!-- Agent prompts -->
+      <section id="agents" class="mx-auto max-w-6xl scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
+        <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl lg:text-6xl">Hand the rest to your agent</h2>
+        <div class="mt-10">
+          <AgentPromptBox client:visible />
+        </div>
+      </section>
+
+      <!-- Threat model -->
+      <section id="security" class="mx-auto max-w-6xl scroll-mt-24 px-5 py-20 sm:px-8 sm:py-28">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl lg:text-6xl">Threat model</h2>
+          <a href={SECURITY_URL} target="_blank" rel="noreferrer" class="text-sm font-medium text-zinc-300 transition-colors hover:text-white">
+            SECURITY.md ↗
+          </a>
+        </div>
+
+        <div class="mt-10 grid gap-4 lg:grid-cols-2">
+          <div class="rounded-[24px] border border-white/[0.08] bg-[#18181b] p-6 sm:p-8">
+            <h3 class="flex items-center gap-2.5 text-xl font-medium text-white">
+              <span class="size-2 rounded-full bg-[#58cc7d] shadow-[0_0_10px_#58cc7d]" aria-hidden="true"></span>
+              Protects against
+            </h3>
+            <ul class="mt-6 divide-y divide-white/[0.06]" role="list">
+              {
+                protects.map(([t, d]) => (
+                  <li class="py-4 first:pt-0 last:pb-0">
+                    <p class="font-medium text-zinc-100">{t}</p>
+                    <p class="mt-1 text-sm leading-relaxed text-zinc-400">{d}</p>
+                  </li>
+                ))
+              }
+            </ul>
+          </div>
+
+          <div class="rounded-[24px] border border-white/[0.08] bg-[#151517] p-6 sm:p-8">
+            <h3 class="flex items-center gap-2.5 text-xl font-medium text-white">
+              <span class="size-2 rounded-full bg-[#f09a7a]" aria-hidden="true"></span>
+              Does not protect against
+            </h3>
+            <ul class="mt-6 divide-y divide-white/[0.06]" role="list">
+              {
+                doesNot.map(([t, d]) => (
+                  <li class="py-4 first:pt-0 last:pb-0">
+                    <p class="font-medium text-zinc-100">{t}</p>
+                    <p class="mt-1 text-sm leading-relaxed text-zinc-400">{d}</p>
+                  </li>
+                ))
+              }
+            </ul>
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-4 sm:grid-cols-3">
+          <div class="rounded-[20px] border border-white/[0.08] px-6 py-5">
+            <p class="text-3xl font-light tracking-[-0.03em] text-white tabular-nums">0</p>
+            <p class="mt-1 text-sm text-zinc-400">network calls from the binary</p>
+          </div>
+          <div class="rounded-[20px] border border-white/[0.08] px-6 py-5">
+            <p class="text-3xl font-light tracking-[-0.03em] text-white tabular-nums">0</p>
+            <p class="mt-1 text-sm text-zinc-400">telemetry</p>
+          </div>
+          <a href={LICENSE_URL} target="_blank" rel="noreferrer" class="rounded-[20px] border border-white/[0.08] px-6 py-5 transition-colors hover:border-white/20">
+            <p class="text-3xl font-light tracking-[-0.03em] text-white">Apache-2.0</p>
+            <p class="mt-1 text-sm text-zinc-400">license ↗</p>
+          </a>
+        </div>
+      </section>
+
+      <!-- Twig family -->
+      <section id="family" class="mx-auto max-w-6xl scroll-mt-24 px-5 py-20 pb-28 sm:px-8 sm:py-24 sm:pb-36">
+        <h2 class="text-4xl font-medium tracking-[-0.035em] text-white sm:text-5xl">The Twig family</h2>
+        <div class="mt-10 grid gap-4 sm:grid-cols-2">
+          <a href={MEMTWIG_URL} class="group flex items-center gap-5 rounded-[24px] border border-white/[0.08] bg-[#18181b] p-6 transition-colors hover:border-[#58cc7d]/40 sm:p-7">
+            <svg viewBox="0 0 32 32" class="size-12 shrink-0" fill="none" aria-hidden="true">
+              <rect width="32" height="32" rx="8" fill="#58cc7d"></rect>
+              <path d="M16 24.5V8" stroke="#111312" stroke-width="2.6" stroke-linecap="round"></path>
+              <path d="M16 18.2L22 12.2" stroke="#111312" stroke-width="2.6" stroke-linecap="round"></path>
+              <path d="M16 13.8L10.2 9.4" stroke="#111312" stroke-width="2.6" stroke-linecap="round"></path>
+              <circle cx="22.5" cy="11.7" r="2.2" fill="#111312"></circle>
+            </svg>
+            <div class="min-w-0">
+              <p class="text-xl font-medium text-white">memtwig</p>
+              <p class="mt-0.5 text-sm text-zinc-400">Memory layer · memtwig.com ↗</p>
+            </div>
+          </a>
+          <div class="flex items-center gap-5 rounded-[24px] border border-[#ebb85e]/30 bg-[#18181b] p-6 sm:p-7">
+            <img src="/favicon.svg" alt="" width="48" height="48" class="size-12 shrink-0" />
+            <div class="min-w-0">
+              <p class="text-xl font-medium text-white">keytwig</p>
+              <p class="mt-0.5 text-sm text-zinc-400">Secret vault · {VERSION}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <SiteFooter />
+  </body>
+</html>
