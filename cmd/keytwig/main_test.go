@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func buildCLI(t *testing.T) string {
@@ -151,5 +154,55 @@ func TestCLIEndToEnd(t *testing.T) {
 	out, code = runCLI(t, bin, home, khome, "", "doctor")
 	if code != 0 || !strings.Contains(out, "[OK]   identity: file") || !strings.Contains(out, "[OK]   config: valid") {
 		t.Fatalf("doctor: code=%d out=%q", code, out)
+	}
+
+	// set --file, ls [file], run --file-key
+	saPath := filepath.Join(t.TempDir(), "sa.json")
+	if err := os.WriteFile(saPath, []byte(`{"private_key":"pem-cli-secret-888"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code = runCLI(t, bin, home, khome, "", "set", "GCP_SA", "--file", saPath)
+	if code != 0 || !strings.Contains(out, "GCP_SA added [file]") {
+		t.Fatalf("set --file: code=%d out=%q", code, out)
+	}
+	out, code = runCLI(t, bin, home, khome, "", "ls")
+	if code != 0 || !strings.Contains(out, "GCP_SA [file]") {
+		t.Fatalf("ls [file]: code=%d out=%q", code, out)
+	}
+	out, code = runCLI(t, bin, home, khome, "", "run", "--file-key", "SA_FILE=GCP_SA", "--", "sh", "-c", "cat \"$SA_FILE\"")
+	if code != 0 || !strings.Contains(out, "‹keytwig:GCP_SA›") || strings.Contains(out, "pem-cli-secret-888") {
+		t.Fatalf("run --file-key: code=%d out=%q", code, out)
+	}
+
+	// hook claude: deny .env, allow .env.example
+	out, code = runCLI(t, bin, home, khome, `{"tool_name":"Read","tool_input":{"file_path":".env"}}`, "hook", "claude")
+	if code != 0 || !strings.Contains(out, `"permissionDecision":"deny"`) {
+		t.Fatalf("hook deny: code=%d out=%q", code, out)
+	}
+	out, code = runCLI(t, bin, home, khome, `{"tool_name":"Read","tool_input":{"file_path":".env.example"}}`, "hook", "claude")
+	if code != 0 || strings.TrimSpace(out) != "{}" {
+		t.Fatalf("hook allow: code=%d out=%q", code, out)
+	}
+
+	// http command + config.toml allowed_hosts + doctor expiry checks
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("auth=" + r.Header.Get("Authorization")))
+	}))
+	defer srv.Close()
+
+	soon := time.Now().Add(5 * 24 * time.Hour).Format("2006-01-02")
+	past := time.Now().Add(-5 * 24 * time.Hour).Format("2006-01-02")
+	cfgRaw := "[secrets.API_KEY]\nallowed_hosts = [\"127.0.0.1\"]\nexpires = \"" + soon + "\"\n\n[secrets.OLD_KEY]\nexpires = \"" + past + "\"\n"
+	if err := os.WriteFile(filepath.Join(khome, "config.toml"), []byte(cfgRaw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code = runCLI(t, bin, home, khome, "", "http", "GET", srv.URL+"/ok", "-H", "Authorization: Bearer {{API_KEY}}")
+	if code != 0 || !strings.Contains(out, "‹keytwig:API_KEY›") || strings.Contains(out, "sk_cli_secret_value_123") {
+		t.Fatalf("http: code=%d out=%q", code, out)
+	}
+
+	out, code = runCLI(t, bin, home, khome, "", "doctor")
+	if code == 0 || !strings.Contains(out, "[WARN] secret API_KEY: expires in") || !strings.Contains(out, "[FAIL] secret OLD_KEY: expired on") {
+		t.Fatalf("doctor expiry: code=%d out=%q", code, out)
 	}
 }

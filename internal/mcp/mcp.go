@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/keytwig/keytwig/internal/audit"
 	"github.com/keytwig/keytwig/internal/config"
 	"github.com/keytwig/keytwig/internal/dotenv"
+	"github.com/keytwig/keytwig/internal/httpclient"
 	"github.com/keytwig/keytwig/internal/runner"
 	"github.com/keytwig/keytwig/internal/scan"
 	"github.com/keytwig/keytwig/internal/vault"
@@ -33,9 +35,10 @@ type Server struct {
 }
 
 const Instructions = `keytwig holds this user's API keys, tokens and passwords. You never see values.
-- To run something that needs a secret, call keytwig_run: the secrets are injected as environment variables into the command and masked in its output as ‹keytwig:NAME›. Refer to them in the command as $VAR (e.g. curl -H "Authorization: Bearer $STRIPE_SECRET_KEY").
+- Prefer keytwig_http for API HTTP calls: pass {{NAME}} placeholders in url, headers, or body (no shell needed). Each secret is only sent to hosts listed in [secrets.NAME] allowed_hosts in config.toml.
+- To run a command or script that needs a secret, call keytwig_run: secrets are injected as env vars (or ephemeral 0600 files via file_keys) and masked in output as ‹keytwig:NAME›. Refer to them as $VAR.
 - Inside a project folder, project=true injects that project's secrets under their usual names (DATABASE_URL, ...).
-- keytwig_list shows which secrets exist (names only). Do not ask the user to paste secrets in chat and never write values into files, notes or messages.
+- keytwig_list shows which secrets exist (names, kind, allowed_hosts, expires). Do not ask the user to paste secrets in chat and never write values into files, notes or messages.
 - If a secret is missing, ask the user to add it themselves with ` + "`keytwig set NAME`" + ` in a terminal, or import an existing .env with keytwig_import.`
 
 type rpcRequest struct {
@@ -135,8 +138,19 @@ func tools() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "keytwig_list",
-			"description": "List secrets available to you (names, aliases, linked projects). Never returns values.",
+			"description": "List secrets available to you (names, aliases, kind, allowed_hosts, expires, linked projects). Never returns values.",
 			"inputSchema": obj(map[string]any{"cwd": str("optional folder: also show which env vars its project gets")}),
+		},
+		{
+			"name":        "keytwig_http",
+			"description": "Make an HTTP request injecting vault secrets via {{NAME}} placeholders, without a shell. Each secret is only sent to hosts listed in [secrets.NAME] allowed_hosts in config.toml. Response is masked.",
+			"inputSchema": obj(map[string]any{
+				"method":      str("HTTP method: GET (default), POST, PUT, PATCH, DELETE, HEAD"),
+				"url":         str("target URL (https, or http only for localhost/127.0.0.1/::1); may contain {{NAME}} outside the host"),
+				"headers":     map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "optional headers; values may contain {{NAME}}"},
+				"body":        str("optional request body; may contain {{NAME}}"),
+				"timeout_sec": map[string]any{"type": "integer", "description": "default 30, max 120"},
+			}, "url"),
 		},
 		{
 			"name":        "keytwig_run",
@@ -144,6 +158,7 @@ func tools() []map[string]any {
 			"inputSchema": obj(map[string]any{
 				"command":     str("shell command line (sh -c on Unix, cmd /C on Windows)"),
 				"keys":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "secrets to inject: NAME or VAR=NAME"},
+				"file_keys":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "file secrets to mount as ephemeral 0600 files (VAR=path): NAME or VAR=NAME"},
 				"project":     map[string]any{"type": "boolean", "description": "inject the secrets of the project containing cwd, under their usual env names"},
 				"cwd":         str("working directory (default: the server's)"),
 				"timeout_sec": map[string]any{"type": "integer", "description": "default 120, max 1800"},
@@ -192,16 +207,33 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 		}
 		cfg := s.cfg()
 		type item struct {
-			Name    string   `json:"name"`
-			Aliases []string `json:"aliases,omitempty"`
+			Name         string   `json:"name"`
+			Aliases      []string `json:"aliases,omitempty"`
+			Kind         string   `json:"kind,omitempty"`
+			AllowedHosts []string `json:"allowed_hosts,omitempty"`
+			Expires      string   `json:"expires,omitempty"`
 		}
 		var items []item
 		for _, n := range v.Names() {
 			sec, _ := v.Get(n)
-			if !cfg.Allowed(s.Agent, append([]string{n}, sec.Aliases...)...) {
+			allNames := append([]string{n}, sec.Aliases...)
+			if !cfg.Allowed(s.Agent, allNames...) {
 				continue
 			}
-			items = append(items, item{n, sec.Aliases})
+			var exp string
+			for _, candidate := range allNames {
+				if sp, ok := cfg.Secrets[candidate]; ok && sp.Expires != "" {
+					exp = sp.Expires
+					break
+				}
+			}
+			items = append(items, item{
+				Name:         n,
+				Aliases:      sec.Aliases,
+				Kind:         sec.Kind,
+				AllowedHosts: cfg.AllowedHosts(allNames...),
+				Expires:      exp,
+			})
 		}
 		out := map[string]any{"secrets": items}
 		if cwd := s.resolveCwd(str("cwd")); cwd != "" {
@@ -216,6 +248,78 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 		}
 		b, _ := json.MarshalIndent(out, "", "  ")
 		return string(b), false
+
+	case "keytwig_http":
+		rawURL := str("url")
+		if strings.TrimSpace(rawURL) == "" {
+			return "url is required", true
+		}
+		v, err := vault.Open(s.Paths)
+		if err != nil {
+			return err.Error(), true
+		}
+		headers := map[string]string{}
+		if hm, ok := args["headers"].(map[string]any); ok {
+			for k, val := range hm {
+				if vs, ok := val.(string); ok {
+					headers[k] = vs
+				}
+			}
+		}
+		timeout := httpclient.DefaultTimeout
+		if t, ok := args["timeout_sec"].(float64); ok && t > 0 {
+			timeout = time.Duration(min(t, 120)) * time.Second
+		}
+		method := str("method")
+		if strings.TrimSpace(method) == "" {
+			method = "GET"
+		}
+		resp, err := httpclient.Do(ctx, v, s.cfg(), httpclient.Request{
+			Method:  method,
+			URL:     rawURL,
+			Headers: headers,
+			Body:    str("body"),
+			Timeout: timeout,
+			Agent:   s.Agent,
+		})
+		if err != nil {
+			return err.Error(), true
+		}
+		cmdSummary := strings.ToUpper(strings.TrimSpace(method)) + " " + rawURL
+		if pu, perr := url.Parse(rawURL); perr == nil && pu.Host != "" {
+			cmdSummary = strings.ToUpper(strings.TrimSpace(method)) + " " + pu.Host + pu.Path
+		}
+		_ = audit.Append(s.Paths.Audit, audit.Event{
+			Time:       time.Now().UTC(),
+			Mode:       "mcp-http",
+			Agent:      s.Agent,
+			Cwd:        s.Cwd,
+			Command:    audit.RedactCommand(cmdSummary, v.Values()),
+			Injected:   resp.Injected,
+			ExitCode:   resp.StatusCode,
+			Redactions: resp.Redactions,
+		})
+		var b strings.Builder
+		fmt.Fprintf(&b, "status: %d\n", resp.StatusCode)
+		if len(resp.Injected) > 0 {
+			fmt.Fprintf(&b, "injected: %s\n", strings.Join(resp.Injected, ", "))
+		}
+		if resp.Redactions > 0 {
+			fmt.Fprintf(&b, "redactions: %d\n", resp.Redactions)
+		}
+		if len(resp.Headers) > 0 {
+			hkeys := make([]string, 0, len(resp.Headers))
+			for k := range resp.Headers {
+				hkeys = append(hkeys, k)
+			}
+			sort.Strings(hkeys)
+			for _, k := range hkeys {
+				fmt.Fprintf(&b, "%s: %s\n", k, resp.Headers[k])
+			}
+		}
+		b.WriteString("--- body ---\n")
+		b.WriteString(resp.Body)
+		return b.String(), false
 
 	case "keytwig_import":
 		path := s.resolvePath(str("path"))
@@ -241,9 +345,17 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 				}
 			}
 		}
+		var fileKeys []string
+		if arr, ok := args["file_keys"].([]any); ok {
+			for _, k := range arr {
+				if ks, ok := k.(string); ok {
+					fileKeys = append(fileKeys, ks)
+				}
+			}
+		}
 		project, _ := args["project"].(bool)
 		cwd := s.resolveCwd(str("cwd"))
-		res, err := runner.Resolve(v, s.cfg(), runner.Spec{Keys: keys, Project: project, Cwd: cwd, Agent: s.Agent})
+		res, err := runner.Resolve(v, s.cfg(), runner.Spec{Keys: keys, FileKeys: fileKeys, Project: project, Cwd: cwd, Agent: s.Agent})
 		if err != nil {
 			return err.Error(), true
 		}

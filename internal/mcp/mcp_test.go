@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -138,5 +141,95 @@ func TestImportRefusesRestrictedFiles(t *testing.T) {
 		if tc.want && !strings.Contains(r.Result.Content[0].Text, "refusing to import harness/backup") {
 			t.Fatalf("%s: unexpected msg %q", tc.name, r.Result.Content[0].Text)
 		}
+	}
+}
+
+func TestHTTPAndListMetadataAndFileKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KEYTWIG_RUNTIME_DIR", filepath.Join(dir, "run"))
+	p := vault.Paths{
+		Identity: filepath.Join(dir, "id"),
+		Vault:    filepath.Join(dir, "v.age"),
+		Config:   filepath.Join(dir, "config.toml"),
+		Audit:    filepath.Join(dir, "audit.jsonl"),
+	}
+	vault.Init(p, vault.ModeFile, nil)
+	v, _ := vault.Open(p)
+	v.Set("API_TOKEN", "tok_http_mcp_secret_99", "test")
+	v.SetFile("GCP_SA", `{"private_key":"pem-secret-123"}`, "sa.json", "test")
+	v.Save()
+
+	os.WriteFile(p.Config, []byte(`
+[secrets.API_TOKEN]
+allowed_hosts = ["127.0.0.1"]
+expires = "2027-01-15"
+`), 0o600)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("echo=" + r.Header.Get("Authorization")))
+	}))
+	defer srv.Close()
+
+	s := &Server{Paths: p, Agent: "claude", Cwd: dir}
+	httpReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "keytwig_http",
+			"arguments": map[string]any{
+				"method":  "GET",
+				"url":     srv.URL + "/ping",
+				"headers": map[string]any{"Authorization": "Bearer {{API_TOKEN}}"},
+			},
+		},
+	})
+	listReq := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"keytwig_list","arguments":{}}}`
+
+	reqs := string(httpReq) + "\n" + listReq + "\n"
+	if runtime.GOOS != "windows" {
+		runFileReq := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"keytwig_run","arguments":{"command":"cat \"$SA_PATH\"","file_keys":["SA_PATH=GCP_SA"]}}}`
+		reqs += runFileReq + "\n"
+	}
+
+	var out bytes.Buffer
+	if err := s.ServeStdio(context.Background(), strings.NewReader(reqs), &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "tok_http_mcp_secret_99") || strings.Contains(out.String(), "pem-secret-123") {
+		t.Fatal("secret leaked in MCP output")
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var r1, r2 struct {
+		Result struct {
+			Content []struct{ Text string }
+			IsError bool
+		}
+	}
+	json.Unmarshal([]byte(lines[0]), &r1)
+	if r1.Result.IsError || !strings.Contains(r1.Result.Content[0].Text, "‹keytwig:API_TOKEN›") {
+		t.Fatalf("keytwig_http unexpected: %+v", r1)
+	}
+	json.Unmarshal([]byte(lines[1]), &r2)
+	if !strings.Contains(r2.Result.Content[0].Text, `"allowed_hosts"`) || !strings.Contains(r2.Result.Content[0].Text, `"2027-01-15"`) || !strings.Contains(r2.Result.Content[0].Text, `"kind": "file"`) {
+		t.Fatalf("keytwig_list metadata missing: %s", r2.Result.Content[0].Text)
+	}
+	if runtime.GOOS != "windows" {
+		var r3 struct {
+			Result struct {
+				Content []struct{ Text string }
+				IsError bool
+			}
+		}
+		json.Unmarshal([]byte(lines[2]), &r3)
+		if r3.Result.IsError || !strings.Contains(r3.Result.Content[0].Text, "‹keytwig:GCP_SA›") {
+			t.Fatalf("keytwig_run file_keys unexpected: %+v", r3)
+		}
+	}
+
+	evs, err := audit.Read(p.Audit, "", 10)
+	if err != nil || len(evs) < 1 || evs[0].Mode != "mcp-http" || evs[0].ExitCode != 200 || evs[0].Redactions < 1 {
+		t.Fatalf("audit mcp-http unexpected: err=%v evs=%+v", err, evs)
 	}
 }

@@ -279,3 +279,32 @@ func TestDefaultPathsAuditAndLock(t *testing.T) {
 	}
 	unlock2()
 }
+
+func TestSetFileSecret(t *testing.T) {
+	p := testPaths(t)
+	if _, err := Init(p, ModeFile, nil); err != nil {
+		t.Fatal(err)
+	}
+	v, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "{\"type\":\"service_account\",\"private_key\":\"abc\"}"
+	if st := v.SetFile("GCP_CREDS", content, "/tmp/service-account.json", "manual"); st != "added" {
+		t.Fatalf("SetFile = %q", st)
+	}
+	if st := v.SetFile("GCP_CREDS_ALIAS", content, "/tmp/other.json", "manual"); st != "alias of GCP_CREDS" {
+		t.Fatalf("SetFile alias = %q", st)
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	v2, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, ok := v2.Get("GCP_CREDS")
+	if !ok || s.Kind != KindFile || s.Filename != "service-account.json" || s.Value != content {
+		t.Fatalf("unexpected file secret: %+v ok=%v", s, ok)
+	}
+}

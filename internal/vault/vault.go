@@ -17,14 +17,21 @@ import (
 	"filippo.io/age"
 )
 
+const (
+	KindEnv  = ""
+	KindFile = "file"
+)
+
 // Secret is one stored value plus where it came from. Aliases are other
 // names that carry the very same value (deduplicated).
 type Secret struct {
-	Value   string    `json:"value"`
-	Source  string    `json:"source,omitempty"`
-	Aliases []string  `json:"aliases,omitempty"`
-	Created time.Time `json:"created"`
-	Updated time.Time `json:"updated"`
+	Value    string    `json:"value"`
+	Kind     string    `json:"kind,omitempty"`
+	Filename string    `json:"filename,omitempty"`
+	Source   string    `json:"source,omitempty"`
+	Aliases  []string  `json:"aliases,omitempty"`
+	Created  time.Time `json:"created"`
+	Updated  time.Time `json:"updated"`
 }
 
 type file struct {
@@ -217,16 +224,35 @@ func (v *Vault) FindByValue(value string) (string, bool) {
 // Set stores a value. Returns "added", "updated", "unchanged" or "alias of X"
 // (when another name already holds the same value, no second copy is made).
 func (v *Vault) Set(name, value, source string) string {
+	return v.setSecret(name, value, KindEnv, "", source)
+}
+
+// SetFile stores a file-based secret with its suggested basename.
+func (v *Vault) SetFile(name, content, filename, source string) string {
+	if filename != "" {
+		filename = filepath.Base(filename)
+	}
+	return v.setSecret(name, content, KindFile, filename, source)
+}
+
+func (v *Vault) setSecret(name, value, kind, filename, source string) string {
 	now := time.Now().UTC()
 	if s, ok := v.Get(name); ok {
 		if s.Value == value {
+			if c := v.Canonical(name); c == name && kind == KindFile && (s.Kind != KindFile || s.Filename != filename) {
+				s.Kind, s.Filename, s.Updated = kind, filename, now
+				if source != "" {
+					s.Source = source
+				}
+				return "updated"
+			}
 			return "unchanged"
 		}
 		if c := v.Canonical(name); c != name {
 			// an alias getting its own value splits off
 			v.removeAlias(c, name)
 		} else {
-			s.Value, s.Updated = value, now
+			s.Value, s.Kind, s.Filename, s.Updated = value, kind, filename, now
 			if source != "" {
 				s.Source = source
 			}
@@ -240,7 +266,7 @@ func (v *Vault) Set(name, value, source string) string {
 		v.alias[name] = owner
 		return "alias of " + owner
 	}
-	v.f.Secrets[name] = &Secret{Value: value, Source: source, Created: now, Updated: now}
+	v.f.Secrets[name] = &Secret{Value: value, Kind: kind, Filename: filename, Source: source, Created: now, Updated: now}
 	return "added"
 }
 

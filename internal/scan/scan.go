@@ -137,7 +137,8 @@ var prunePaths = []string{
 var exampleRe = regexp.MustCompile(`(?i)(example|sample|esempio|template|dist|\.lock)$`)
 var backupRe = regexp.MustCompile(`(?i)(bak|backup|snapshot|\.moved-|\.orig|\.old|pre-)`)
 
-func isEnvName(base string) bool {
+// IsEnvName reports whether a file basename looks like an env file (excluding examples/templates/locks).
+func IsEnvName(base string) bool {
 	if base == "go.env" || exampleRe.MatchString(base) {
 		return false
 	}
@@ -167,7 +168,8 @@ var toolFiles = []struct{ suffix, kind string }{
 
 var keyFileRe = regexp.MustCompile(`(?i)(\.jks|\.p12|\.pfx|\.keystore|^id_(rsa|ed25519|ecdsa|dsa)|_ed25519|_rsa|key\.pem|\.token)$`)
 
-func classifyTool(path string) string {
+// ClassifyTool reports the credential kind if path matches a well-known tool credential or key file.
+func ClassifyTool(path string) string {
 	slash := filepath.ToSlash(path)
 	for _, t := range toolFiles {
 		if strings.HasSuffix(slash, t.suffix) {
@@ -232,7 +234,7 @@ func Run(roots []string, vaultHashes map[string][32]byte, o Options) (*Report, e
 			mode := info.Mode().Perm()
 			// Unix permission bits mean nothing on Windows (ACLs).
 			loose := runtime.GOOS != "windows" && mode&0o044 != 0
-			if isEnvName(d.Name()) {
+			if IsEnvName(d.Name()) {
 				ef, refs := readEnv(path)
 				if ef == nil {
 					return nil
@@ -248,7 +250,7 @@ func Run(roots []string, vaultHashes map[string][32]byte, o Options) (*Report, e
 				}
 				return nil
 			}
-			if kind := classifyTool(path); kind != "" {
+			if kind := ClassifyTool(path); kind != "" {
 				rep.ToolFiles = append(rep.ToolFiles, ToolFile{Path: path, Kind: kind, Mode: mode.String(), LooseMode: loose})
 			}
 			return nil

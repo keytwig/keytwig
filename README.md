@@ -54,16 +54,22 @@ keytwig install all              # MCP server in Claude Code, Codex, Cursor, Win
 `keytwig install <claude|codex|cursor|windsurf|hermes|grok|antigravity|all>` (antigravity: standalone and T3-managed) registers `keytwig mcp --agent <harness>`
 (config backed up as `*.keytwig.bak`). Tools exposed — none returns a value:
 
-- `keytwig_run` — run a shell command with secrets injected (`keys`, or `project: true`); output masked
-- `keytwig_list` — names, aliases, and which env vars the current project gets
+- `keytwig_http` — make an HTTP request injecting `{{NAME}}` placeholders directly (no shell), restricted by `[secrets.NAME] allowed_hosts`, response masked
+- `keytwig_run` — run a shell command with secrets injected (`keys`, `file_keys`, or `project: true`); output masked
+- `keytwig_list` — names, aliases, kind, `allowed_hosts`, expiry, and which env vars the current project gets
 - `keytwig_import` — move a `.env` into the vault without values passing through the model
 - `keytwig_status`
 
 There is no get/set tool on purpose. Masking protects against accidents (logs,
 stack traces, `env` dumps), not against an agent that deliberately transforms a
-value (e.g. reverses it) before printing.
+value (e.g. reverses it) before printing. Use `keytwig_http` when calling APIs
+so secrets are scoped per host and never touch a shell.
 
-### Per-agent policies (`config.toml`)
+`keytwig install claude` (and `keytwig install all`) also installs a `PreToolUse`
+hook (`keytwig hook claude`) that blocks direct reads of `.env`, vault, and
+credential files or raw env dumps (pass `--no-hooks` to skip).
+
+### Per-agent and per-secret policies (`config.toml`)
 
 ```toml
 [agents.hermes]
@@ -72,6 +78,11 @@ deny  = ["*_PROD"]
 
 [agents.default]        # unnamed or unlisted agents
 deny = ["STRIPE_*"]
+
+[secrets.STRIPE_SECRET_KEY]
+allowed_hosts = ["api.stripe.com"]
+expires = "2026-12-31"
+note = "Stripe live key"
 ```
 
 Deny wins; aliases cannot dodge a deny. This is a guardrail between your own
@@ -130,16 +141,20 @@ keytwig scan [dir...] [--all] [--json]
 keytwig import <file> [--only A,B] [--prefix P] [--overwrite]
 keytwig import --scan [dir...] [--dry-run] [--include-app]
 printf %s "$V" | keytwig set NAME     # or interactive hidden prompt; never from argv
-keytwig ls [--json]                   # names, aliases, source, last update — no values
+keytwig set NAME --file path/to/sa.json  # store a file secret (max 1 MiB)
+keytwig ls [--json]                   # names, kind, aliases, source, last update — no values
 keytwig rm NAME
 keytwig run -k NAME -k VAR=NAME -- cmd
+keytwig run --file-key SA=GCP_SA -- cmd  # mount file secret ephemerally (0600, wiped on exit)
 keytwig run -p -- cmd                 # current project's secrets
+keytwig http GET https://api.stripe.com/v1/charges -H 'Authorization: Bearer {{STRIPE_SECRET_KEY}}'
+keytwig hook [claude|cursor]          # PreToolUse secret guard (stdin JSON)
 keytwig rewrite [file...|--scan] [--apply]  /  keytwig restore ...
 keytwig mcp [--agent NAME]
-keytwig install <harness|all> [--dry-run]
-keytwig uninstall <harness|all>       # remove keytwig's MCP registration
+keytwig install <harness|all> [--dry-run] [--no-hooks]
+keytwig uninstall <harness|all>       # remove keytwig's MCP registration (and Claude hook)
 keytwig log [--agent X] [--limit N] [--json]
-keytwig doctor                        # check local setup
+keytwig doctor                        # check local setup, permissions, expiry, harnesses
 keytwig version
 keytwig run --env-file app.env -- cmd # app.env: API_KEY=keytwig://STRIPE_SECRET_KEY
 ```

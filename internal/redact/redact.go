@@ -141,3 +141,58 @@ scan:
 	_, err := w.out.Write(out.Bytes())
 	return err
 }
+
+// AddBasicAuthPairs derives user:pass entries (and therefore their base64
+// variants via Variants) for matching *_USER/*_USERNAME and *_PASS/*_PASSWORD
+// secret pairs in env, storing them in dst.
+func AddBasicAuthPairs(dst, env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	type pair struct {
+		user string
+		pass string
+	}
+	byPrefix := map[string]*pair{}
+	getPair := func(prefix string) *pair {
+		p := byPrefix[prefix]
+		if p == nil {
+			p = &pair{}
+			byPrefix[prefix] = p
+		}
+		return p
+	}
+	for k, val := range env {
+		if len(val) < 4 {
+			continue
+		}
+		up := strings.ToUpper(k)
+		switch {
+		case up == "USER" || up == "USERNAME":
+			getPair("").user = val
+		case up == "PASS" || up == "PASSWORD":
+			getPair("").pass = val
+		case strings.HasSuffix(up, "_USERNAME"):
+			getPair(strings.TrimSuffix(up, "_USERNAME")).user = val
+		case strings.HasSuffix(up, "_USER"):
+			getPair(strings.TrimSuffix(up, "_USER")).user = val
+		case strings.HasSuffix(up, "_PASSWORD"):
+			getPair(strings.TrimSuffix(up, "_PASSWORD")).pass = val
+		case strings.HasSuffix(up, "_PASS"):
+			getPair(strings.TrimSuffix(up, "_PASS")).pass = val
+		}
+	}
+	for prefix, p := range byPrefix {
+		if p.user == "" || p.pass == "" {
+			continue
+		}
+		name := "BASIC_AUTH"
+		if prefix != "" {
+			name = prefix + "_BASIC_AUTH"
+		}
+		if _, exists := dst[name]; exists {
+			name += "_PAIR"
+		}
+		dst[name] = p.user + ":" + p.pass
+	}
+}

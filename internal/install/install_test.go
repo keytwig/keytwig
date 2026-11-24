@@ -38,6 +38,10 @@ func TestInstallAllDetectedIdempotentAndUninstall(t *testing.T) {
 	if !strings.Contains(string(hermes), "  keytwig:\n") || !strings.Contains(string(hermes), "  memtwig:") {
 		t.Fatalf("hermes: %s", hermes)
 	}
+	claudeSettings, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if !strings.Contains(string(claudeSettings), "PreToolUse") || !strings.Contains(string(claudeSettings), "hook claude") {
+		t.Fatalf("claude settings hook missing: %s", claudeSettings)
+	}
 	windsurf, _ := os.ReadFile(filepath.Join(home, ".codeium", "windsurf", "mcp_config.json"))
 	if !strings.Contains(string(windsurf), `"keytwig"`) {
 		t.Fatalf("windsurf: %s", windsurf)
@@ -104,5 +108,23 @@ func TestInstallAllDetectedIdempotentAndUninstall(t *testing.T) {
 	hermesAfter, _ := os.ReadFile(filepath.Join(home, ".hermes", "config.yaml"))
 	if strings.Contains(string(hermesAfter), "keytwig") || !strings.Contains(string(hermesAfter), "memtwig") {
 		t.Fatalf("hermes after uninstall: %s", hermesAfter)
+	}
+	claudeSettingsAfter, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if strings.Contains(string(claudeSettingsAfter), "hook claude") {
+		t.Fatalf("claude hook not removed: %s", claudeSettingsAfter)
+	}
+}
+
+func TestInstallNoHooksOption(t *testing.T) {
+	home := t.TempDir()
+	fakeBin := filepath.Join(home, "keytwig")
+	_ = os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o700)
+
+	if _, err := InstallWithOptions("claude", fakeBin, home, Options{WithHooks: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no settings.json when WithHooks=false, stat err=%v", err)
 	}
 }

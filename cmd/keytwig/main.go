@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +24,8 @@ import (
 	"github.com/keytwig/keytwig/internal/config"
 	"github.com/keytwig/keytwig/internal/dotenv"
 	"github.com/keytwig/keytwig/internal/envfile"
+	"github.com/keytwig/keytwig/internal/hook"
+	"github.com/keytwig/keytwig/internal/httpclient"
 	"github.com/keytwig/keytwig/internal/install"
 	kmcp "github.com/keytwig/keytwig/internal/mcp"
 	"github.com/keytwig/keytwig/internal/runner"
@@ -43,7 +46,7 @@ func main() {
 		SilenceErrors: true,
 	}
 	root.AddCommand(initCmd(), statusCmd(), protectCmd(), unlockCmd(), lockCmd(), identityCmd(),
-		scanCmd(), importCmd(), setCmd(), lsCmd(), rmCmd(), runCmd(), logCmd(),
+		scanCmd(), importCmd(), setCmd(), lsCmd(), rmCmd(), runCmd(), httpCmd(), hookCmd(), logCmd(),
 		rewriteCmd(), restoreCmd(), mcpCmd(), installCmd(), uninstallCmd(), doctorCmd(), versionCmd())
 	if err := root.Execute(); err != nil {
 		var ee *exitError
@@ -728,14 +731,42 @@ func importCmd() *cobra.Command {
 }
 
 func setCmd() *cobra.Command {
-	return &cobra.Command{
+	var filePath string
+	c := &cobra.Command{
 		Use:   "set <NAME>",
-		Short: "Store a secret read from a hidden prompt or from stdin (never from arguments)",
+		Short: "Store a secret read from a hidden prompt, stdin, or --file (never from arguments)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if !nameRe.MatchString(name) {
 				return fmt.Errorf("invalid name %q: use letters, digits and _", name)
+			}
+			var st string
+			if filePath != "" {
+				const maxFileBytes = 1 << 20
+				f, err := os.Open(filePath)
+				if err != nil {
+					return err
+				}
+				b, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+				f.Close()
+				if err != nil {
+					return err
+				}
+				if len(b) > maxFileBytes {
+					return fmt.Errorf("%s exceeds 1 MiB limit for file secrets", filePath)
+				}
+				if len(b) == 0 {
+					return errors.New("empty file, nothing stored")
+				}
+				if err := mutate(func(v *vault.Vault) (bool, error) {
+					st = v.SetFile(name, string(b), filepath.Base(filePath), filePath)
+					return st != "unchanged", nil
+				}); err != nil {
+					return err
+				}
+				fmt.Printf("%s %s [file]\n", name, st)
+				return nil
 			}
 			var value string
 			if term.IsTerminal(int(os.Stdin.Fd())) {
@@ -756,7 +787,6 @@ func setCmd() *cobra.Command {
 			if value == "" {
 				return errors.New("empty value, nothing stored")
 			}
-			var st string
 			if err := mutate(func(v *vault.Vault) (bool, error) {
 				st = v.Set(name, value, "manual")
 				return st != "unchanged", nil
@@ -767,6 +797,8 @@ func setCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().StringVar(&filePath, "file", "", "read secret content from a file (max 1 MiB)")
+	return c
 }
 
 func lsCmd() *cobra.Command {
@@ -781,15 +813,17 @@ func lsCmd() *cobra.Command {
 				return err
 			}
 			type item struct {
-				Name    string   `json:"name"`
-				Aliases []string `json:"aliases,omitempty"`
-				Source  string   `json:"source"`
-				Updated string   `json:"updated"`
+				Name     string   `json:"name"`
+				Kind     string   `json:"kind,omitempty"`
+				Filename string   `json:"filename,omitempty"`
+				Aliases  []string `json:"aliases,omitempty"`
+				Source   string   `json:"source"`
+				Updated  string   `json:"updated"`
 			}
 			var items []item
 			for _, n := range v.Names() {
 				s, _ := v.Get(n)
-				items = append(items, item{n, s.Aliases, s.Source, s.Updated.Local().Format("2006-01-02 15:04")})
+				items = append(items, item{n, s.Kind, s.Filename, s.Aliases, s.Source, s.Updated.Local().Format("2006-01-02 15:04")})
 			}
 			if asJSON {
 				return json.NewEncoder(os.Stdout).Encode(items)
@@ -797,11 +831,15 @@ func lsCmd() *cobra.Command {
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 			fmt.Fprintln(tw, "NAME\tALIASES\tUPDATED\tSOURCE")
 			for _, it := range items {
+				display := it.Name
+				if it.Kind == vault.KindFile {
+					display += " [file]"
+				}
 				al := strings.Join(it.Aliases, ", ")
 				if al == "" {
 					al = "—"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", it.Name, al, it.Updated, shortPath(it.Source))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", display, al, it.Updated, shortPath(it.Source))
 			}
 			tw.Flush()
 			return nil
@@ -863,7 +901,7 @@ func loadConfig() config.Config {
 }
 
 func runCmd() *cobra.Command {
-	var keys []string
+	var keys, fileKeys []string
 	var envFile, agent string
 	var all, project, noRedact bool
 	c := &cobra.Command{
@@ -873,11 +911,12 @@ func runCmd() *cobra.Command {
 
   -k NAME            inject NAME
   -k VAR=NAME        inject secret NAME as env var VAR
+  --file-key NAME    mount secret as an ephemeral 0600 file (VAR=NAME or NAME)
   -p, --project      inject the secrets of the project containing the current folder, under their usual names
   --env-file F       read KEY=value lines; values written as keytwig://NAME are resolved
   --all              inject every secret (aliases included)
 
-Every stored value (6+ chars, also base64/URL/JSON-encoded) is replaced in
+Every stored value (6+ chars, also base64/URL/JSON-encoded, hex for 8+ chars) is replaced in
 stdout/stderr with ‹keytwig:NAME›. Agent policies from config.toml apply
 (--agent or KEYTWIG_AGENT).`,
 		Args: cobra.MinimumNArgs(1),
@@ -890,7 +929,7 @@ stdout/stderr with ‹keytwig:NAME›. Agent policies from config.toml apply
 			cwd, _ := os.Getwd()
 			ag := agentName(agent)
 			res, err := runner.Resolve(v, loadConfig(), runner.Spec{
-				Keys: keys, EnvFile: envFile, All: all, Project: project, Cwd: cwd, Agent: ag,
+				Keys: keys, FileKeys: fileKeys, EnvFile: envFile, All: all, Project: project, Cwd: cwd, Agent: ag,
 			})
 			if err != nil {
 				return err
@@ -923,12 +962,99 @@ stdout/stderr with ‹keytwig:NAME›. Agent policies from config.toml apply
 		},
 	}
 	c.Flags().StringSliceVarP(&keys, "key", "k", nil, "secret to inject: NAME or VAR=NAME (repeatable, comma-separated)")
+	c.Flags().StringSliceVar(&fileKeys, "file-key", nil, "file secret to mount ephemerally: NAME or VAR=NAME")
 	c.Flags().BoolVarP(&project, "project", "p", false, "inject the current project's secrets under their usual names")
 	c.Flags().StringVar(&envFile, "env-file", "", "env file whose keytwig://NAME values are resolved")
 	c.Flags().BoolVar(&all, "all", false, "inject every secret")
 	c.Flags().BoolVar(&noRedact, "no-redact", false, "do not mask secrets in output (interactive programs)")
 	c.Flags().StringVar(&agent, "agent", "", "agent name for policies (default $KEYTWIG_AGENT)")
 	return c
+}
+
+func httpCmd() *cobra.Command {
+	var headers []string
+	var body, agent string
+	var timeout time.Duration
+	c := &cobra.Command{
+		Use:   "http <METHOD> <URL>",
+		Short: "Make an HTTP request with {{NAME}} secret placeholders (host-allowlisted, response masked)",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			method, rawURL := "GET", args[0]
+			if len(args) == 2 {
+				method, rawURL = args[0], args[1]
+			}
+			hdrMap := map[string]string{}
+			for _, h := range headers {
+				k, v, ok := strings.Cut(h, ":")
+				if !ok {
+					return fmt.Errorf("invalid header %q (expected 'Key: Value')", h)
+				}
+				hdrMap[strings.TrimSpace(k)] = strings.TrimSpace(v)
+			}
+			p := paths()
+			v, err := vault.Open(p)
+			if err != nil {
+				return err
+			}
+			ag := agentName(agent)
+			cwd, _ := os.Getwd()
+			resp, err := httpclient.Do(context.Background(), v, loadConfig(), httpclient.Request{
+				Method:  method,
+				URL:     rawURL,
+				Headers: hdrMap,
+				Body:    body,
+				Timeout: timeout,
+				Agent:   ag,
+			})
+			if err != nil {
+				return err
+			}
+			cmdSummary := strings.ToUpper(strings.TrimSpace(method)) + " " + rawURL
+			if pu, perr := url.Parse(rawURL); perr == nil && pu.Host != "" {
+				cmdSummary = strings.ToUpper(strings.TrimSpace(method)) + " " + pu.Host + pu.Path
+			}
+			_ = audit.Append(p.Audit, audit.Event{
+				Time:       time.Now().UTC(),
+				Mode:       "cli-http",
+				Agent:      ag,
+				Cwd:        cwd,
+				Command:    audit.RedactCommand(cmdSummary, v.Values()),
+				Injected:   resp.Injected,
+				ExitCode:   resp.StatusCode,
+				Redactions: resp.Redactions,
+			})
+			fmt.Fprintf(os.Stderr, "HTTP %d\n", resp.StatusCode)
+			fmt.Print(resp.Body)
+			if !strings.HasSuffix(resp.Body, "\n") {
+				fmt.Println()
+			}
+			return nil
+		},
+	}
+	c.Flags().StringArrayVarP(&headers, "header", "H", nil, "HTTP header 'Key: Value' (repeatable)")
+	c.Flags().StringVarP(&body, "data", "d", "", "request body")
+	c.Flags().StringVar(&agent, "agent", "", "agent name for policies (default $KEYTWIG_AGENT)")
+	c.Flags().DurationVar(&timeout, "timeout", httpclient.DefaultTimeout, "request timeout (max 120s)")
+	return c
+}
+
+func hookCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "hook [claude|cursor]",
+		Short: "PreToolUse secret guard for AI agent harnesses (reads JSON from stdin)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			harness := "claude"
+			if len(args) == 1 {
+				harness = strings.ToLower(strings.TrimSpace(args[0]))
+			}
+			if harness != "claude" && harness != "cursor" {
+				return fmt.Errorf("unsupported hook harness %q (supported: claude, cursor)", harness)
+			}
+			return hook.Run(os.Stdin, os.Stdout, paths())
+		},
+	}
 }
 
 func envFileCmd(use, short string, fn func(string, *vault.Vault, bool) (*envfile.Result, error)) *cobra.Command {
@@ -1032,13 +1158,13 @@ func mcpCmd() *cobra.Command {
 }
 
 func installCmd() *cobra.Command {
-	var dryRun bool
+	var dryRun, noHooks bool
 	c := &cobra.Command{
 		Use:   "install <" + strings.Join(install.Supported, "|") + "|all>",
-		Short: "Register the keytwig MCP server in an agent harness (backs up the config first)",
+		Short: "Register the keytwig MCP server (and PreToolUse hook on Claude) in an agent harness",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := install.Install(args[0], "", "", dryRun)
+			res, err := install.InstallWithOptions(args[0], "", "", install.Options{DryRun: dryRun, WithHooks: !noHooks})
 			for _, r := range res {
 				state := "configured"
 				switch {
@@ -1047,9 +1173,9 @@ func installCmd() *cobra.Command {
 				case dryRun:
 					state = "would configure"
 				}
-				fmt.Printf("%-8s %s  %s\n", r.Harness, state, shortPath(r.Path))
+				fmt.Printf("%-11s %s  %s\n", r.Harness, state, shortPath(r.Path))
 				if r.Changed && r.Note != "" && !dryRun {
-					fmt.Println("         " + r.Note)
+					fmt.Println("            " + r.Note)
 				}
 			}
 			if len(res) == 0 && err == nil {
@@ -1059,6 +1185,7 @@ func installCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change")
+	c.Flags().BoolVar(&noHooks, "no-hooks", false, "skip installing PreToolUse secret guard hooks")
 	return c
 }
 
@@ -1206,6 +1333,37 @@ func doctorCmd() *cobra.Command {
 			} else {
 				fmt.Printf("[OK]   config: valid (%d agent policies, %d custom harness, %d ignore)\n",
 					len(cfg.Agents), len(cfg.Harness), len(cfg.Ignore))
+				httpHosts := 0
+				secNames := make([]string, 0, len(cfg.Secrets))
+				for k, sp := range cfg.Secrets {
+					secNames = append(secNames, k)
+					if len(sp.AllowedHosts) > 0 {
+						httpHosts++
+					}
+				}
+				sort.Strings(secNames)
+				fmt.Printf("[OK]   http policies: %d secrets with allowed_hosts\n", httpHosts)
+				now := time.Now()
+				today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+				for _, k := range secNames {
+					expStr := strings.TrimSpace(cfg.Secrets[k].Expires)
+					if expStr == "" {
+						continue
+					}
+					exp, perr := time.Parse("2006-01-02", expStr)
+					if perr != nil {
+						fmt.Printf("[WARN] secret %s: invalid expires date %q (expected YYYY-MM-DD)\n", k, expStr)
+						continue
+					}
+					switch {
+					case exp.Before(today):
+						fmt.Printf("[FAIL] secret %s: expired on %s\n", k, expStr)
+						failures++
+					case exp.Sub(today) <= 14*24*time.Hour:
+						days := int(exp.Sub(today) / (24 * time.Hour))
+						fmt.Printf("[WARN] secret %s: expires in %d day(s) (%s)\n", k, days, expStr)
+					}
+				}
 			}
 
 			checks := install.Check("")

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -25,17 +26,26 @@ const RefPrefix = "keytwig://"
 
 // Spec says which secrets to inject.
 type Spec struct {
-	Keys    []string // NAME or VAR=NAME
-	EnvFile string   // KEY=value lines, keytwig://NAME resolved
-	All     bool     // every secret (aliases included)
-	Project bool     // the secrets linked to the project folder containing Cwd
-	Cwd     string
-	Agent   string
+	Keys     []string // NAME or VAR=NAME
+	FileKeys []string // NAME or VAR=NAME written to ephemeral 0600 files
+	EnvFile  string   // KEY=value lines, keytwig://NAME resolved
+	All      bool     // every secret (aliases included)
+	Project  bool     // the secrets linked to the project folder containing Cwd
+	Cwd      string
+	Agent    string
+}
+
+// FileMount describes one file-backed secret to materialize during Run.
+type FileMount struct {
+	SecretName string
+	Filename   string
+	Content    string
 }
 
 // Resolution is what will be injected: env var → value, plus the names used.
 type Resolution struct {
 	Env        map[string]string
+	Files      map[string]FileMount
 	Injected   []string // env var names, sorted
 	ProjectDir string
 	Denied     []string // secret names refused by policy (only reported with All/Project)
@@ -43,7 +53,7 @@ type Resolution struct {
 
 // Resolve applies Spec against the vault and the agent policy.
 func Resolve(v *vault.Vault, cfg config.Config, s Spec) (*Resolution, error) {
-	r := &Resolution{Env: map[string]string{}}
+	r := &Resolution{Env: map[string]string{}, Files: map[string]FileMount{}}
 	get := func(name string, strict bool) (string, bool, error) {
 		sec, ok := v.Get(name)
 		if !ok {
@@ -124,8 +134,36 @@ func Resolve(v *vault.Vault, cfg config.Config, s Spec) (*Resolution, error) {
 		}
 		r.Env[varName] = val
 	}
+	for _, spec := range s.FileKeys {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		varName, name := spec, spec
+		if i := strings.IndexByte(spec, '='); i > 0 {
+			varName, name = spec[:i], spec[i+1:]
+		}
+		val, _, err := get(name, true)
+		if err != nil {
+			return nil, err
+		}
+		sec, _ := v.Get(name)
+		r.Files[varName] = FileMount{
+			SecretName: v.Canonical(name),
+			Filename:   sec.Filename,
+			Content:    val,
+		}
+	}
+	seenInj := map[string]bool{}
 	for k := range r.Env {
+		seenInj[k] = true
 		r.Injected = append(r.Injected, k)
+	}
+	for k := range r.Files {
+		if !seenInj[k] {
+			seenInj[k] = true
+			r.Injected = append(r.Injected, k)
+		}
 	}
 	sort.Strings(r.Injected)
 	return r, nil
@@ -169,15 +207,33 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (RunResul
 	configureCmd(cmd)
 	cmd.Dir = e.Dir
 	cmd.Stdin = e.Stdin
+
+	var cleanupFiles func()
+	filePaths := map[string]string{}
+	if len(res.Files) > 0 {
+		var err error
+		filePaths, cleanupFiles, err = mountFileSecrets(res.Files)
+		if err != nil {
+			return RunResult{ExitCode: 1}, err
+		}
+		defer cleanupFiles()
+	}
+
 	cmd.Env = os.Environ()
 	for _, k := range res.Injected {
-		cmd.Env = append(cmd.Env, k+"="+res.Env[k])
+		if p, ok := filePaths[k]; ok {
+			cmd.Env = append(cmd.Env, k+"="+p)
+			continue
+		}
+		if val, ok := res.Env[k]; ok {
+			cmd.Env = append(cmd.Env, k+"="+val)
+		}
 	}
 	var outW, errW *redact.Writer
 	if e.NoRedact {
 		cmd.Stdout, cmd.Stderr = e.Stdout, e.Stderr
 	} else {
-		secrets := v.Values()
+		secrets := redactSecrets(v, res)
 		outW, errW = redact.New(e.Stdout, secrets), redact.New(e.Stderr, secrets)
 		cmd.Stdout, cmd.Stderr = outW, errW
 	}
@@ -217,4 +273,100 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (RunResul
 		return RunResult{ExitCode: 1, Redactions: redactions}, werr
 	}
 	return RunResult{ExitCode: 0, Redactions: redactions}, nil
+}
+
+func redactSecrets(v *vault.Vault, res *Resolution) map[string]string {
+	out := v.Values()
+	if res == nil || len(res.Env) == 0 {
+		return out
+	}
+	redact.AddBasicAuthPairs(out, res.Env)
+	return out
+}
+
+func mountBaseDir() string {
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			return d
+		}
+	}
+	return os.TempDir()
+}
+
+func sanitizeMountFilename(fm FileMount) string {
+	name := strings.TrimSpace(fm.Filename)
+	if name != "" {
+		name = filepath.Base(name)
+	}
+	if name == "" || name == "." || name == ".." || name == "/" || name == `\` {
+		name = fm.SecretName + ".secret"
+	}
+	return name
+}
+
+func mountFileSecrets(files map[string]FileMount) (map[string]string, func(), error) {
+	root, err := os.MkdirTemp(mountBaseDir(), "keytwig-mount-*")
+	if err != nil && mountBaseDir() != os.TempDir() {
+		root, err = os.MkdirTemp(os.TempDir(), "keytwig-mount-*")
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	_ = os.Chmod(root, 0o700)
+
+	var created []string
+	cleanup := func() {
+		for _, p := range created {
+			wipeFile(p)
+		}
+		_ = os.RemoveAll(root)
+	}
+
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	paths := make(map[string]string, len(keys))
+	for i, k := range keys {
+		fm := files[k]
+		sub := filepath.Join(root, fmt.Sprintf("f%d", i))
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		fp := filepath.Join(sub, sanitizeMountFilename(fm))
+		f, err := os.OpenFile(fp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		_, werr := f.WriteString(fm.Content)
+		cerr := f.Close()
+		if werr != nil {
+			cleanup()
+			return nil, nil, werr
+		}
+		if cerr != nil {
+			cleanup()
+			return nil, nil, cerr
+		}
+		created = append(created, fp)
+		paths[k] = fp
+	}
+	return paths, cleanup, nil
+}
+
+func wipeFile(path string) {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	if st, err := f.Stat(); err == nil && st.Size() > 0 {
+		zeros := make([]byte, st.Size())
+		_, _ = f.WriteAt(zeros, 0)
+		_ = f.Sync()
+	}
+	_ = f.Close()
 }

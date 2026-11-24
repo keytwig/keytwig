@@ -42,8 +42,20 @@ func resolveHome(home string) (string, error) {
 	return os.UserHomeDir()
 }
 
-// Install configures one harness, or every detected one with "all".
+// Options control optional install behaviors such as agent hooks.
+type Options struct {
+	DryRun    bool
+	WithHooks bool
+}
+
+// Install configures one harness, or every detected one with "all" (hooks enabled by default).
 func Install(harness, bin, home string, dryRun bool) ([]Result, error) {
+	return InstallWithOptions(harness, bin, home, Options{DryRun: dryRun, WithHooks: true})
+}
+
+// InstallWithOptions configures one harness, or every detected one with "all".
+func InstallWithOptions(harness, bin, home string, opts Options) ([]Result, error) {
+	dryRun := opts.DryRun
 	var err error
 	home, err = resolveHome(home)
 	if err != nil {
@@ -67,6 +79,20 @@ func Install(harness, bin, home string, dryRun bool) ([]Result, error) {
 		switch h {
 		case "claude":
 			r, err = jsonServers(h, filepath.Join(home, ".claude.json"), bin, true, dryRun)
+			if err == nil && opts.WithHooks {
+				hc, herr := installClaudeHook(filepath.Join(home, ".claude", "settings.json"), bin, dryRun)
+				if herr != nil {
+					return out, herr
+				}
+				if hc {
+					r.Changed = true
+					if r.Note == "already configured" {
+						r.Note = "PreToolUse hook configured"
+					} else {
+						r.Note = "MCP + PreToolUse hook configured"
+					}
+				}
+			}
 		case "cursor":
 			r, err = jsonServers(h, filepath.Join(home, ".cursor", "mcp.json"), bin, false, dryRun)
 		case "windsurf":
@@ -117,6 +143,14 @@ func Uninstall(harness, home string, dryRun bool) ([]Result, error) {
 			r, err := uninstallJSON(h, filepath.Join(home, ".claude.json"), dryRun)
 			if err != nil {
 				return out, err
+			}
+			hc, herr := uninstallClaudeHook(filepath.Join(home, ".claude", "settings.json"), dryRun)
+			if herr != nil {
+				return out, herr
+			}
+			if hc {
+				r.Changed = true
+				r.Note = "MCP + PreToolUse hook removed"
 			}
 			if harness != "all" || r.Changed {
 				out = append(out, r)
@@ -571,6 +605,101 @@ func checkBinary(bin string) (bool, string) {
 		return false, "binary not executable: " + bin
 	}
 	return true, "ok (" + bin + ")"
+}
+
+func installClaudeHook(path, bin string, dryRun bool) (bool, error) {
+	data := map[string]any{}
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if len(strings.TrimSpace(string(raw))) > 0 {
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return false, fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
+	hooks, _ := data["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	cmdStr := bin + " hook claude"
+	arr, _ := hooks["PreToolUse"].([]any)
+	for _, entry := range arr {
+		if b, _ := json.Marshal(entry); strings.Contains(string(b), "hook claude") && strings.Contains(string(b), "keytwig") {
+			return false, nil
+		}
+	}
+	arr = append(arr, map[string]any{
+		"hooks": []map[string]any{
+			{"type": "command", "command": cmdStr},
+		},
+	})
+	hooks["PreToolUse"] = arr
+	data["hooks"] = hooks
+	out, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	if !dryRun {
+		if err := writeWithBackup(path, append(out, '\n')); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func uninstallClaudeHook(path string, dryRun bool) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return false, nil
+	}
+	data := map[string]any{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	hooks, _ := data["hooks"].(map[string]any)
+	arr, _ := hooks["PreToolUse"].([]any)
+	if len(arr) == 0 {
+		return false, nil
+	}
+	var kept []any
+	removed := false
+	for _, entry := range arr {
+		if b, _ := json.Marshal(entry); strings.Contains(string(b), "hook claude") && strings.Contains(string(b), "keytwig") {
+			removed = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !removed {
+		return false, nil
+	}
+	if len(kept) == 0 {
+		delete(hooks, "PreToolUse")
+	} else {
+		hooks["PreToolUse"] = kept
+	}
+	if len(hooks) == 0 {
+		delete(data, "hooks")
+	} else {
+		data["hooks"] = hooks
+	}
+	out, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	if !dryRun {
+		if err := writeWithBackup(path, append(out, '\n')); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func writeWithBackup(path string, content []byte) error {
