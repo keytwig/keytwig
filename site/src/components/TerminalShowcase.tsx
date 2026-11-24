@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 
 /*
- * Transcripts recorded with keytwig v0.1.0 in a sandbox (KEYTWIG_HOME, dummy key sk_test_demo…) on 2026-11-24.
+ * Transcripts recorded with keytwig v0.2.0 in a sandbox (KEYTWIG_HOME, dummy key sk_test_demo…) on 2026-11-24.
  * Only the project path was shortened to ~/code/shop. Every command is valid shell as shown, line breaks included.
  * Segment kinds: "" plain output, dim = table headers, ok = added, mask = ‹keytwig:NAME›, leak = the value in clear.
  */
@@ -75,7 +75,7 @@ const steps: Step[] = [
       cmd: ["keytwig log --limit 1"],
       out: [
         [["TIME                 MODE  AGENT  EXIT  REDACT  INJECTED           COMMAND", "dim"]],
-        [[`2026-11-24 20:35:32  cli   —      0     1       STRIPE_SECRET_KEY  sh -c curl -s https://httpbin.org/bearer \\ -H "Authorization: Bearer $STRIPE_SECRET_KEY"`]],
+        [[`2026-11-24 21:21:45  cli   —      0     1       STRIPE_SECRET_KEY  sh -c curl -s https://httpbin.org/bearer \\ -H "Authorization: Bearer $STRIPE_SECRET_KEY"`]],
       ],
     },
   },

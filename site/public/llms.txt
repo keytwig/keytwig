@@ -5,7 +5,7 @@
 ## Key facts
 - Website: https://keytwig.dev
 - Repository: https://github.com/keytwig/keytwig
-- Latest release: v0.1.0 (2026-11-24, Apache-2.0) — https://github.com/keytwig/keytwig/releases/tag/v0.1.0
+- Latest release: v0.2.0 (2026-11-24, Apache-2.0) — https://github.com/keytwig/keytwig/releases/tag/v0.2.0
 - MCP Registry: io.github.keytwig/keytwig
 - Author: Vittorio Compagno (https://vittoriocompagno.com)
 - Security contact: ciao@vittoriocompagno.com or GitHub private vulnerability reporting
@@ -16,26 +16,35 @@
 - `go install github.com/keytwig/keytwig/cmd/keytwig@latest`
 - Prebuilt releases for Linux, macOS, Windows on amd64 and arm64, verified against `checksums.txt`
 
+## New in v0.2.0
+- `keytwig_http` MCP tool and `keytwig http` CLI: HTTP requests with `{{NAME}}` placeholders, no shell, HTTPS only (except localhost), per-secret `[secrets.NAME] allowed_hosts` (exact and wildcard subdomain, empty denies), cross-host redirects refused when secrets are injected, response masked, audit logged.
+- `[secrets.NAME]` config: `allowed_hosts`, `expires`, `note`; `keytwig doctor` checks expiry.
+- `keytwig hook claude|cursor`: `PreToolUse` guard blocking direct reads of `.env`, `vault.age`, `identity.txt`, credential files and raw env dumps. Registered for Claude Code by `keytwig install` (`--no-hooks` to opt out), removed by `keytwig uninstall`.
+- File-backed secrets: `keytwig set NAME --file path` (max 1 MiB), `keytwig run --file-key VAR=NAME`, MCP `file_keys`. Materialized in an ephemeral `0700` directory (`$XDG_RUNTIME_DIR` when available) as `0600` files, overwritten with zeros and deleted on exit.
+- Basic auth redaction when matching `*_USER`/`*_USERNAME` and `*_PASS`/`*_PASSWORD` pairs are injected together.
+
 ## Quick start
 - `keytwig init` — identity bound to this machine, no prompts (or `--passphrase`, `--keyring`, `--file`)
 - `keytwig scan` — where credentials live today (names and paths only)
 - `keytwig import --scan --dry-run`, then `keytwig import --scan`
 - `keytwig run -k STRIPE_SECRET_KEY -- ./deploy.sh`
 - `keytwig run -p -- npm run dev` — the project's own secrets, usual names
-- `keytwig install all` — MCP server in Claude Code, Codex, Cursor, Windsurf, Hermes, Grok, Antigravity
+- `keytwig install all` — MCP server in Claude Code, Codex, Cursor, Windsurf, Hermes, Grok, Antigravity (plus the PreToolUse hook in Claude Code)
+- `keytwig http GET https://api.stripe.com/v1/charges -H 'Authorization: Bearer {{STRIPE_SECRET_KEY}}'`
 
 ## MCP tools (none returns a value; there is no get/set tool)
-- `keytwig_run` — run a shell command with secrets injected (`keys`, or `project: true`); output masked
-- `keytwig_list` — names, aliases, and which env vars the current project gets
+- `keytwig_http` — make an HTTP request injecting `{{NAME}}` placeholders directly (no shell), restricted by `[secrets.NAME] allowed_hosts`, response masked
+- `keytwig_run` — run a shell command with secrets injected (`keys`, `file_keys`, or `project: true`); output masked
+- `keytwig_list` — names, aliases, kind, `allowed_hosts`, expiry, and which env vars the current project gets
 - `keytwig_import` — move a `.env` into the vault without values passing through the model
 - `keytwig_status`
 
 ## Security model
 - Vault encrypted at rest with age (X25519). Machine mode: systemd-creds on Linux (TPM2 where available), login Keychain on macOS, DPAPI-backed Credential Manager on Windows. Passphrase mode: scrypt, `keytwig unlock --ttl`. `--file` stores the identity in plaintext.
-- Redaction covers raw, base64, URL and JSON-encoded values (6+ chars) and hex for 8+ chars, across write boundaries. It protects against accidents (logs, stack traces, env dumps), not against a command that deliberately transforms a value.
+- Redaction covers raw, base64, URL and JSON-encoded values (6+ chars) and hex for 8+ chars, across write boundaries, plus Basic auth headers from `*_USER`/`*_PASS` pairs. It protects against accidents (logs, stack traces, env dumps), not against a shell command that deliberately transforms a value; use `keytwig_http` for API calls.
 - Per-agent `allow`/`deny` rules in `config.toml` (`[agents.<name>]`, `[agents.default]`); deny wins, aliases cannot dodge a deny. A guardrail between your own agents, not isolation.
 - `keytwig log` reads `audit.jsonl` next to the vault: operation metadata, no secret values.
-- The binary makes zero network calls and sends zero telemetry.
+- Unless explicitly invoked via `keytwig http` / `keytwig_http`, the binary makes zero network calls and sends zero telemetry.
 
 ## Docs
 - [README](https://github.com/keytwig/keytwig#readme)

@@ -1,7 +1,7 @@
 ---
 /*
  * Path of a secret. Above the line, amber: the machine side where values exist (sources, vault,
- * entry point, child process, redactor). Below, mint: what leaves keytwig (masked output for the model,
+ * entry point, child process or keytwig_http request, redactor). Below, mint: what leaves keytwig (masked output for the model,
  * metadata for audit.jsonl). Desktop: five columns, then the boundary, then the two outputs under the
  * node that feeds them. Mobile: one column. Rails and dots come from global.css (.rail-*).
  */
@@ -10,8 +10,8 @@ type Node = { title: string[]; lines?: string[]; chips?: string[]; mask?: string
 const machine: Node[] = [
   { title: [".env", "keytwig set"], lines: ["import --scan", "stdin, never argv"] },
   { title: ["vault.age"], lines: ["age · X25519", "TPM2 · Keychain · DPAPI", "or scrypt passphrase"] },
-  { title: ["keytwig mcp", "keytwig run"], lines: ["--agent <harness>", "allow / deny per agent"] },
-  { title: ["child process"], lines: ["env vars injected", "-k NAME · -p"] },
+  { title: ["keytwig mcp", "keytwig run / http"], lines: ["--agent <harness>", "allow / deny per agent", "PreToolUse hook guard"] },
+  { title: ["child process", "or HTTPS request"], lines: ["env vars · 0600 files", "allowed_hosts per secret"] },
   { title: ["stream redactor"], chips: ["raw", "base64", "url", "json", "hex ≥ 8"] },
 ];
 
