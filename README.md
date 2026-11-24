@@ -1,11 +1,41 @@
 # keytwig
 
+[![CI](https://github.com/keytwig/keytwig/actions/workflows/ci.yml/badge.svg)](https://github.com/keytwig/keytwig/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
 One local vault for the secrets your projects and agents use. Agents use
-secrets through `keytwig run`: values are injected into the process and masked
-in its output, so the model never reads them.
+secrets through `keytwig run`, which injects values into a child process and
+masks them in stdout and stderr.
 
 Sibling of [memtwig](https://github.com/memtwig/memtwig). Linux, macOS and
-Windows (single static binary, no cgo).
+Windows (single static binary, no cgo). See [SECURITY.md](SECURITY.md) for the
+threat model and reporting instructions.
+
+## Install
+
+- Linux or macOS (downloads and verifies the release archive)
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/keytwig/keytwig/main/scripts/install.sh | sh
+  ```
+
+  Set `KEYTWIG_INSTALL_DIR` to override `~/.local/bin` or `KEYTWIG_VERSION` to select a tag such as `v0.1.0`.
+
+- Homebrew on Linux or macOS
+
+  ```sh
+  brew install memtwig/tap/keytwig
+  ```
+
+- Build with Go
+
+  ```sh
+  go install github.com/keytwig/keytwig/cmd/keytwig@latest
+  ```
+
+- [Prebuilt releases](https://github.com/keytwig/keytwig/releases) for Linux,
+  macOS, and Windows on amd64 and arm64. Verify the archive against
+  `checksums.txt`, extract it, and put the binary on your `PATH`.
 
 ## Quick start
 
@@ -16,12 +46,12 @@ keytwig import --scan --dry-run  # what would be imported from your project .env
 keytwig import --scan
 keytwig run -k STRIPE_SECRET_KEY -- ./deploy.sh
 cd ~/code/shop && keytwig run -p -- npm run dev   # the project's own secrets, usual names
-keytwig install all              # MCP server in Claude Code, Codex, Cursor, Hermes, Grok, Antigravity
+keytwig install all              # MCP server in Claude Code, Codex, Cursor, Windsurf, Hermes, Grok, Antigravity
 ```
 
 ## Agents
 
-`keytwig install <claude|codex|cursor|hermes|grok|antigravity|all>` (antigravity: standalone and T3-managed) registers `keytwig mcp --agent <harness>`
+`keytwig install <claude|codex|cursor|windsurf|hermes|grok|antigravity|all>` (antigravity: standalone and T3-managed) registers `keytwig mcp --agent <harness>`
 (config backed up as `*.keytwig.bak`). Tools exposed — none returns a value:
 
 - `keytwig_run` — run a shell command with secrets injected (`keys`, or `project: true`); output masked
@@ -37,7 +67,7 @@ value (e.g. reverses it) before printing.
 
 ```toml
 [agents.hermes]
-allow = ["SABATINO_*", "STRIPE_*"]
+allow = ["ACME_*", "STRIPE_*"]
 deny  = ["*_PROD"]
 
 [agents.default]        # unnamed or unlisted agents
@@ -71,7 +101,7 @@ over `.env` (Next.js, Vite, dotenv) keep working under `keytwig run -p`.
 ## Deduplication
 
 - Identical value, different names → stored once; the other names become **aliases**.
-- Same name, different value per project (e.g. `DATABASE_URL`) → not a duplicate: `import --scan` stores each one as `<PROJECT>__NAME`. Map it back at run time: `-k DATABASE_URL=PREVENTIVATORE__DATABASE_URL`.
+- Same name, different value per project (e.g. `DATABASE_URL`) → `import --scan` stores each one as `<PROJECT>__NAME`. Map it back at run time with `-k DATABASE_URL=BILLING__DATABASE_URL`.
 
 ## Protecting the identity
 
@@ -95,6 +125,7 @@ keytwig status
 keytwig protect --machine | --passphrase | --keyring | --file
 keytwig unlock [--ttl 12h]  /  keytwig lock
 keytwig identity export --out FILE
+keytwig identity import FILE           # restore an exported identity
 keytwig scan [dir...] [--all] [--json]
 keytwig import <file> [--only A,B] [--prefix P] [--overwrite]
 keytwig import --scan [dir...] [--dry-run] [--include-app]
@@ -106,12 +137,20 @@ keytwig run -p -- cmd                 # current project's secrets
 keytwig rewrite [file...|--scan] [--apply]  /  keytwig restore ...
 keytwig mcp [--agent NAME]
 keytwig install <harness|all> [--dry-run]
+keytwig uninstall <harness|all>       # remove keytwig's MCP registration
+keytwig log [--agent X] [--limit N] [--json]
+keytwig doctor                        # check local setup
+keytwig version
 keytwig run --env-file app.env -- cmd # app.env: API_KEY=keytwig://STRIPE_SECRET_KEY
 ```
 
-`run` replaces every stored value (6+ chars, also base64 / URL / JSON-encoded)
+`run` replaces every stored value (6+ chars, also base64 / URL / JSON-encoded, and hex for 8+ chars)
 in stdout/stderr with `‹keytwig:NAME›`, also across write boundaries.
 `--no-redact` for interactive programs.
+
+`keytwig log` reads `audit.jsonl` next to the encrypted vault. Entries record operation
+metadata without secret values. Filter by agent or limit the number of
+entries. Use `--json` for machine-readable output.
 
 ## Files
 

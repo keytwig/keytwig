@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -18,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/keytwig/keytwig/internal/audit"
 	"github.com/keytwig/keytwig/internal/config"
 	"github.com/keytwig/keytwig/internal/dotenv"
 	"github.com/keytwig/keytwig/internal/envfile"
@@ -41,8 +43,8 @@ func main() {
 		SilenceErrors: true,
 	}
 	root.AddCommand(initCmd(), statusCmd(), protectCmd(), unlockCmd(), lockCmd(), identityCmd(),
-		scanCmd(), importCmd(), setCmd(), lsCmd(), rmCmd(), runCmd(),
-		rewriteCmd(), restoreCmd(), mcpCmd(), installCmd())
+		scanCmd(), importCmd(), setCmd(), lsCmd(), rmCmd(), runCmd(), logCmd(),
+		rewriteCmd(), restoreCmd(), mcpCmd(), installCmd(), uninstallCmd(), doctorCmd(), versionCmd())
 	if err := root.Execute(); err != nil {
 		var ee *exitError
 		if errors.As(err, &ee) {
@@ -122,10 +124,8 @@ func readPassphrase(prompt string, confirm, fromStdin bool) ([]byte, error) {
 	return a, nil
 }
 
-var machineFlag bool
-
-func modeFlags(c *cobra.Command, pass, kr, file *bool, stdin *bool) {
-	c.Flags().BoolVar(&machineFlag, "machine", false, "bind the identity to this machine, no prompts (TPM on Linux, Keychain on macOS, DPAPI on Windows) — default for init")
+func modeFlags(c *cobra.Command, machine, pass, kr, file, stdin *bool) {
+	c.Flags().BoolVar(machine, "machine", false, "bind the identity to this machine, no prompts (TPM on Linux, Keychain on macOS, DPAPI on Windows) — default for init")
 	c.Flags().BoolVar(pass, "passphrase", false, "protect the identity with a passphrase; `keytwig unlock` once per boot")
 	c.Flags().BoolVar(kr, "keyring", false, "keep the identity in the system keyring (protected by your login password)")
 	if file != nil {
@@ -134,10 +134,10 @@ func modeFlags(c *cobra.Command, pass, kr, file *bool, stdin *bool) {
 	c.Flags().BoolVar(stdin, "passphrase-stdin", false, "read the passphrase from stdin instead of the terminal")
 }
 
-func pickMode(pass, kr, file bool) (string, error) {
+func pickMode(machine, pass, kr, file bool) (string, error) {
 	n := 0
 	mode := vault.ModeMachine
-	if machineFlag {
+	if machine {
 		n++
 	}
 	if pass {
@@ -159,13 +159,13 @@ func pickMode(pass, kr, file bool) (string, error) {
 }
 
 func initCmd() *cobra.Command {
-	var pass, kr, file, stdin bool
+	var machine, pass, kr, file, stdin bool
 	c := &cobra.Command{
 		Use:   "init",
 		Short: "Create the identity and an empty encrypted vault",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			mode, err := pickMode(pass, kr, file)
+			mode, err := pickMode(machine, pass, kr, file)
 			if err != nil {
 				return err
 			}
@@ -188,7 +188,7 @@ func initCmd() *cobra.Command {
 			return printStatus(p)
 		},
 	}
-	modeFlags(c, &pass, &kr, &file, &stdin)
+	modeFlags(c, &machine, &pass, &kr, &file, &stdin)
 	return c
 }
 
@@ -226,16 +226,16 @@ func statusCmd() *cobra.Command {
 }
 
 func protectCmd() *cobra.Command {
-	var pass, kr, file, stdin bool
+	var machine, pass, kr, file, stdin bool
 	c := &cobra.Command{
 		Use:   "protect (--machine | --passphrase | --keyring | --file)",
 		Short: "Change how the identity is stored; the vault itself is not re-encrypted",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !pass && !kr && !file && !machineFlag {
+			if !pass && !kr && !file && !machine {
 				return errors.New("choose one of --machine, --passphrase, --keyring, --file")
 			}
-			mode, err := pickMode(pass, kr, file)
+			mode, err := pickMode(machine, pass, kr, file)
 			if err != nil {
 				return err
 			}
@@ -256,7 +256,7 @@ func protectCmd() *cobra.Command {
 			return printStatus(p)
 		},
 	}
-	modeFlags(c, &pass, &kr, &file, &stdin)
+	modeFlags(c, &machine, &pass, &kr, &file, &stdin)
 	return c
 }
 
@@ -309,7 +309,7 @@ func lockCmd() *cobra.Command {
 }
 
 func identityCmd() *cobra.Command {
-	c := &cobra.Command{Use: "identity", Short: "Identity backup"}
+	c := &cobra.Command{Use: "identity", Short: "Identity backup and restore"}
 	var out string
 	exp := &cobra.Command{
 		Use:   "export --out FILE",
@@ -327,7 +327,35 @@ func identityCmd() *cobra.Command {
 		},
 	}
 	exp.Flags().StringVar(&out, "out", "", "destination file (must not exist)")
-	c.AddCommand(exp)
+
+	var machine, pass, kr, file, stdin, force bool
+	imp := &cobra.Command{
+		Use:   "import <FILE>",
+		Short: "Restore an exported identity file into keytwig",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mode, err := pickMode(machine, pass, kr, file)
+			if err != nil {
+				return err
+			}
+			var pp []byte
+			if mode == vault.ModePassphrase {
+				if pp, err = readPassphrase("new passphrase: ", true, stdin); err != nil {
+					return err
+				}
+			}
+			p := paths()
+			if err := vault.Import(p, args[0], mode, pp, force); err != nil {
+				return err
+			}
+			fmt.Println("imported identity, mode:", mode)
+			return printStatus(p)
+		},
+	}
+	modeFlags(imp, &machine, &pass, &kr, &file, &stdin)
+	imp.Flags().BoolVar(&force, "force", false, "overwrite an existing identity")
+
+	c.AddCommand(exp, imp)
 	return c
 }
 
@@ -496,7 +524,7 @@ type importRow struct{ name, status string }
 var nonName = regexp.MustCompile(`[^A-Z0-9]+`)
 
 // projectPrefix: the folder holding the env file, as an env-safe name
-// (~/code/preventivatore-demo/.env → PREVENTIVATORE_DEMO).
+// (~/code/billing-api/.env → BILLING_API).
 func projectPrefix(file string) string {
 	dir := filepath.Base(filepath.Dir(file))
 	p := strings.Trim(nonName.ReplaceAllString(strings.ToUpper(dir), "_"), "_")
@@ -854,13 +882,15 @@ stdout/stderr with ‹keytwig:NAME›. Agent policies from config.toml apply
 (--agent or KEYTWIG_AGENT).`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, err := vault.Open(paths())
+			p := paths()
+			v, err := vault.Open(p)
 			if err != nil {
 				return err
 			}
 			cwd, _ := os.Getwd()
+			ag := agentName(agent)
 			res, err := runner.Resolve(v, loadConfig(), runner.Spec{
-				Keys: keys, EnvFile: envFile, All: all, Project: project, Cwd: cwd, Agent: agentName(agent),
+				Keys: keys, EnvFile: envFile, All: all, Project: project, Cwd: cwd, Agent: ag,
 			})
 			if err != nil {
 				return err
@@ -868,15 +898,26 @@ stdout/stderr with ‹keytwig:NAME›. Agent policies from config.toml apply
 			if len(res.Denied) > 0 {
 				fmt.Fprintf(os.Stderr, "keytwig: not allowed for this agent: %s\n", strings.Join(res.Denied, ", "))
 			}
-			code, err := runner.Run(context.Background(), v, res, runner.Exec{
+			rr, err := runner.Run(context.Background(), v, res, runner.Exec{
 				Argv: args, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 				NoRedact: noRedact, ForwardSignals: true,
+			})
+			_ = audit.Append(p.Audit, audit.Event{
+				Time:       time.Now().UTC(),
+				Mode:       "cli",
+				Agent:      ag,
+				Cwd:        cwd,
+				Command:    audit.RedactCommand(strings.Join(args, " "), v.Values()),
+				Injected:   res.Injected,
+				Denied:     res.Denied,
+				ExitCode:   rr.ExitCode,
+				Redactions: rr.Redactions,
 			})
 			if err != nil {
 				return err
 			}
-			if code != 0 {
-				return &exitError{code}
+			if rr.ExitCode != 0 {
+				return &exitError{rr.ExitCode}
 			}
 			return nil
 		},
@@ -1019,4 +1060,183 @@ func installCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change")
 	return c
+}
+
+func uninstallCmd() *cobra.Command {
+	var dryRun bool
+	c := &cobra.Command{
+		Use:   "uninstall <" + strings.Join(install.Supported, "|") + "|all>",
+		Short: "Remove the keytwig MCP server from an agent harness (backs up the config first)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			res, err := install.Uninstall(args[0], "", dryRun)
+			for _, r := range res {
+				state := "removed"
+				switch {
+				case !r.Changed:
+					state = r.Note
+				case dryRun:
+					state = "would remove"
+				}
+				fmt.Printf("%-11s %s  %s\n", r.Harness, state, shortPath(r.Path))
+				if r.Changed && r.Note != "" && !dryRun {
+					fmt.Println("            " + r.Note)
+				}
+			}
+			if len(res) == 0 && err == nil {
+				fmt.Println("keytwig is not configured in any supported harness")
+			}
+			return err
+		},
+	}
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change")
+	return c
+}
+
+func logCmd() *cobra.Command {
+	var agent string
+	var limit int
+	var asJSON bool
+	c := &cobra.Command{
+		Use:   "log",
+		Short: "Show recent command execution audit events",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			evs, err := audit.Read(paths().Audit, agent, limit)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				if evs == nil {
+					evs = []audit.Event{}
+				}
+				return json.NewEncoder(os.Stdout).Encode(evs)
+			}
+			if len(evs) == 0 {
+				fmt.Println("no audit events recorded")
+				return nil
+			}
+			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+			fmt.Fprintln(tw, "TIME\tMODE\tAGENT\tEXIT\tREDACT\tINJECTED\tCOMMAND")
+			for _, ev := range evs {
+				ag := ev.Agent
+				if ag == "" {
+					ag = "—"
+				}
+				inj := strings.Join(ev.Injected, ",")
+				if inj == "" {
+					inj = "—"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+					ev.Time.Local().Format("2006-01-02 15:04:05"), ev.Mode, ag, ev.ExitCode, ev.Redactions, inj, ev.Command)
+			}
+			tw.Flush()
+			return nil
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "filter by agent name")
+	c.Flags().IntVar(&limit, "limit", 50, "maximum number of recent events to show")
+	c.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
+	return c
+}
+
+func doctorCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Check vault status, file permissions, config validity, and harness integrations",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p := paths()
+			failures := 0
+
+			st, stErr := vault.GetStatus(p)
+			if stErr != nil {
+				fmt.Printf("[FAIL] identity: %v\n", stErr)
+				failures++
+			} else {
+				state := "unlocked"
+				if st.Locked {
+					state = "locked"
+				}
+				fmt.Printf("[OK]   identity: %s (%s)\n", st.Mode, state)
+				if st.Warning != "" {
+					fmt.Printf("[WARN] identity: %s\n", st.Warning)
+				}
+				if !st.Locked {
+					if v, err := vault.Open(p); err != nil {
+						fmt.Printf("[FAIL] vault: %v\n", err)
+						failures++
+					} else {
+						fmt.Printf("[OK]   vault: %d secrets (%d names)\n", len(v.Names()), len(v.Env()))
+					}
+				}
+			}
+
+			if runtime.GOOS != "windows" {
+				for _, item := range []struct {
+					label string
+					path  string
+				}{
+					{"identity", p.Identity},
+					{"vault", p.Vault},
+					{"audit", p.Audit},
+				} {
+					info, err := os.Stat(item.path)
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+					if err != nil {
+						fmt.Printf("[FAIL] %s permissions: %v\n", item.label, err)
+						failures++
+						continue
+					}
+					perm := info.Mode().Perm()
+					if perm&0o077 != 0 {
+						fmt.Printf("[WARN] %s (%s) has mode %04o; expected 0600 (run chmod 600)\n", item.label, shortPath(item.path), perm)
+					} else {
+						fmt.Printf("[OK]   %s permissions: %04o (%s)\n", item.label, perm, shortPath(item.path))
+					}
+				}
+			}
+
+			cfg, cfgErr := config.Load(p.Config)
+			if cfgErr != nil {
+				fmt.Printf("[FAIL] config (%s): %v\n", shortPath(p.Config), cfgErr)
+				failures++
+			} else {
+				fmt.Printf("[OK]   config: valid (%d agent policies, %d custom harness, %d ignore)\n",
+					len(cfg.Agents), len(cfg.Harness), len(cfg.Ignore))
+			}
+
+			checks := install.Check("")
+			if len(checks) == 0 {
+				fmt.Println("[OK]   harnesses: none configured")
+			} else {
+				for _, c := range checks {
+					tag := "[OK]  "
+					if !c.OK {
+						tag = "[FAIL]"
+						failures++
+					}
+					fmt.Printf("%s harness %-11s %s (%s)\n", tag, c.Harness+":", c.Note, shortPath(c.Path))
+				}
+			}
+
+			if failures > 0 {
+				return fmt.Errorf("%d check(s) failed", failures)
+			}
+			return nil
+		},
+	}
+}
+
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the keytwig version",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Println("keytwig", version)
+		},
+	}
 }

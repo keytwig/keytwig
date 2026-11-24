@@ -144,9 +144,15 @@ type Exec struct {
 	ForwardSignals bool
 }
 
+// RunResult reports the child's exit code and how many secret redactions occurred.
+type RunResult struct {
+	ExitCode   int
+	Redactions int
+}
+
 // Run executes with res.Env added and every vault value masked in output.
-// Returns the child's exit code.
-func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (int, error) {
+// Returns the child's exit code and redaction count.
+func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (RunResult, error) {
 	var cmd *exec.Cmd
 	switch {
 	case e.Shell != "":
@@ -158,8 +164,9 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (int, err
 	case len(e.Argv) > 0:
 		cmd = exec.CommandContext(ctx, e.Argv[0], e.Argv[1:]...)
 	default:
-		return 1, errors.New("no command")
+		return RunResult{ExitCode: 1}, errors.New("no command")
 	}
+	configureCmd(cmd)
 	cmd.Dir = e.Dir
 	cmd.Stdin = e.Stdin
 	cmd.Env = os.Environ()
@@ -175,7 +182,7 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (int, err
 		cmd.Stdout, cmd.Stderr = outW, errW
 	}
 	if err := cmd.Start(); err != nil {
-		return 127, err
+		return RunResult{ExitCode: 127}, err
 	}
 	var sigs chan os.Signal
 	if e.ForwardSignals {
@@ -183,7 +190,7 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (int, err
 		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		go func() {
 			for s := range sigs {
-				_ = cmd.Process.Signal(s)
+				signalProcess(cmd, s)
 			}
 		}()
 	}
@@ -192,9 +199,11 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (int, err
 		signal.Stop(sigs)
 		close(sigs)
 	}
+	redactions := 0
 	if outW != nil {
-		outW.Close()
-		errW.Close()
+		_ = outW.Close()
+		_ = errW.Close()
+		redactions = outW.Count() + errW.Count()
 	}
 	if werr != nil {
 		var ee *exec.ExitError
@@ -203,9 +212,9 @@ func Run(ctx context.Context, v *vault.Vault, res *Resolution, e Exec) (int, err
 			if code < 0 {
 				code = 1
 			}
-			return code, nil
+			return RunResult{ExitCode: code, Redactions: redactions}, nil
 		}
-		return 1, werr
+		return RunResult{ExitCode: 1, Redactions: redactions}, werr
 	}
-	return 0, nil
+	return RunResult{ExitCode: 0, Redactions: redactions}, nil
 }

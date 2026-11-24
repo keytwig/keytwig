@@ -5,17 +5,19 @@ package redact
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/url"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Variants are the forms a secret commonly takes in output: as is,
 // base64 (std/url, padded or not — e.g. Basic auth headers), URL-encoded,
-// JSON-escaped.
+// JSON-escaped, and hex-encoded (for values of at least 8 bytes).
 func Variants(v string) []string {
 	out := []string{v}
 	add := func(s string) {
@@ -36,6 +38,9 @@ func Variants(v string) []string {
 	if j, err := json.Marshal(v); err == nil {
 		add(strings.Trim(string(j), `"`))
 	}
+	if len(v) >= 8 {
+		add(hex.EncodeToString(b))
+	}
 	return out
 }
 
@@ -49,15 +54,17 @@ type pattern struct {
 }
 
 type Writer struct {
-	mu   sync.Mutex
-	out  io.Writer
-	pats []pattern // longest first
-	buf  []byte
+	mu      sync.Mutex
+	out     io.Writer
+	byFirst [256][]pattern // longest first per starting byte
+	buf     []byte
+	count   atomic.Int64
 }
 
 // New builds a redacting writer. secrets maps name → value.
 func New(out io.Writer, secrets map[string]string) *Writer {
 	w := &Writer{out: out}
+	var pats []pattern
 	seen := map[string]bool{}
 	for name, v := range secrets {
 		if len(v) < MinLen {
@@ -69,11 +76,20 @@ func New(out io.Writer, secrets map[string]string) *Writer {
 				continue
 			}
 			seen[form] = true
-			w.pats = append(w.pats, pattern{value: []byte(form), placeholder: ph})
+			pats = append(pats, pattern{value: []byte(form), placeholder: ph})
 		}
 	}
-	sort.Slice(w.pats, func(i, j int) bool { return len(w.pats[i].value) > len(w.pats[j].value) })
+	sort.Slice(pats, func(i, j int) bool { return len(pats[i].value) > len(pats[j].value) })
+	for _, p := range pats {
+		b := p.value[0]
+		w.byFirst[b] = append(w.byFirst[b], p)
+	}
 	return w
+}
+
+// Count returns how many secret replacements have been written so far.
+func (w *Writer) Count() int {
+	return int(w.count.Load())
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
@@ -99,15 +115,17 @@ func (w *Writer) drain(final bool) error {
 scan:
 	for i < len(w.buf) {
 		rest := w.buf[i:]
-		for _, p := range w.pats {
+		cands := w.byFirst[rest[0]]
+		for _, p := range cands {
 			if bytes.HasPrefix(rest, p.value) {
 				out.Write(p.placeholder)
+				w.count.Add(1)
 				i += len(p.value)
 				continue scan
 			}
 		}
 		if !final {
-			for _, p := range w.pats {
+			for _, p := range cands {
 				if len(rest) < len(p.value) && bytes.HasPrefix(p.value, rest) {
 					break scan // could become a secret with the next write
 				}

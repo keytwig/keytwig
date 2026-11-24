@@ -4,7 +4,7 @@ import "testing"
 
 func TestAllowed(t *testing.T) {
 	c := Config{Agents: map[string]AgentPolicy{
-		"hermes":  {Allow: []string{"SABATINO_*"}, Deny: []string{"*_PROD"}},
+		"hermes":  {Allow: []string{"ACME_*"}, Deny: []string{"*_PROD"}},
 		"default": {Deny: []string{"STRIPE_*"}},
 	}}
 	cases := []struct {
@@ -12,10 +12,10 @@ func TestAllowed(t *testing.T) {
 		names []string
 		want  bool
 	}{
-		{"hermes", []string{"SABATINO_DB"}, true},
+		{"hermes", []string{"ACME_DB"}, true},
 		{"hermes", []string{"OTHER"}, false},
-		{"hermes", []string{"SABATINO_KEY_PROD"}, false},
-		{"hermes", []string{"OTHER", "SABATINO_ALIAS"}, true},
+		{"hermes", []string{"ACME_KEY_PROD"}, false},
+		{"hermes", []string{"OTHER", "ACME_ALIAS"}, true},
 		{"", []string{"STRIPE_KEY"}, false},
 		{"unknown", []string{"ANY"}, true},
 		{"unknown", []string{"ANY", "STRIPE_ALIAS"}, false}, // alias cannot dodge deny

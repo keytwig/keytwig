@@ -319,3 +319,60 @@ func Export(p Paths, out string) error {
 	}
 	return f.Close()
 }
+
+// Import reads an exported identity file (containing an AGE-SECRET-KEY line)
+// and stores it in the requested mode, verifying the round-trip.
+func Import(p Paths, inFile, mode string, passphrase []byte, force bool) error {
+	if !force {
+		if _, err := os.Stat(p.Identity); err == nil {
+			return fmt.Errorf("identity already exists (%s): use --force to overwrite", p.Identity)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	raw, err := os.ReadFile(inFile)
+	if err != nil {
+		return err
+	}
+	id, err := parseIdentity(raw)
+	if err != nil {
+		return fmt.Errorf("invalid identity file %s: %w", inFile, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p.Identity), 0o700); err != nil {
+		return err
+	}
+	old, oldErr := os.ReadFile(p.Identity)
+	oldExists := oldErr == nil
+	oldMode := ""
+	if oldExists {
+		oldMode = detectMode(old)
+	}
+	if err := storeIdentity(p, id, mode, passphrase); err != nil {
+		if oldExists {
+			_ = writeAtomic(p.Identity, old, 0o600)
+		} else {
+			_ = os.Remove(p.Identity)
+		}
+		return err
+	}
+	if back, err := loadIdentity(p); err != nil || back.String() != id.String() {
+		if oldExists {
+			_ = writeAtomic(p.Identity, old, 0o600)
+		} else {
+			_ = os.Remove(p.Identity)
+		}
+		return errors.New("verification failed after import, previous identity restored")
+	}
+	if oldExists && oldMode != mode {
+		if oldMode == ModeMachine {
+			machineCleanup(old)
+		}
+		if oldMode == ModeKeyring {
+			_ = keyring.Delete(keyringService, keyringUser(p))
+		}
+		if oldMode == ModePassphrase {
+			_ = os.Remove(runtimeCache(p))
+		}
+	}
+	return nil
+}

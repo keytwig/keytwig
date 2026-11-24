@@ -36,17 +36,24 @@ type file struct {
 	Projects map[string]map[string]string `json:"projects,omitempty"`
 }
 
-// Paths tells where the identity and the encrypted vault live.
+// Paths tells where the identity, the encrypted vault, config, and audit log live.
 type Paths struct {
 	Identity string
 	Vault    string
 	Config   string
+	Audit    string
 }
 
 // DefaultPaths honours KEYTWIG_HOME, otherwise XDG locations.
 func DefaultPaths() (Paths, error) {
 	if h := os.Getenv("KEYTWIG_HOME"); h != "" {
-		return Paths{Identity: filepath.Join(h, "identity.txt"), Vault: filepath.Join(h, "vault.age"), Config: filepath.Join(h, "config.toml")}, nil
+		v := filepath.Join(h, "vault.age")
+		return Paths{
+			Identity: filepath.Join(h, "identity.txt"),
+			Vault:    v,
+			Config:   filepath.Join(h, "config.toml"),
+			Audit:    filepath.Join(filepath.Dir(v), "audit.jsonl"),
+		}, nil
 	}
 	// Native locations: Linux ~/.config + ~/.local/share (XDG),
 	// macOS ~/Library/Application Support, Windows %AppData%.
@@ -65,10 +72,12 @@ func DefaultPaths() (Paths, error) {
 			data = filepath.Join(home, ".local", "share")
 		}
 	}
+	v := filepath.Join(data, "keytwig", "vault.age")
 	return Paths{
 		Identity: filepath.Join(cfg, "keytwig", "identity.txt"),
-		Vault:    filepath.Join(data, "keytwig", "vault.age"),
+		Vault:    v,
 		Config:   filepath.Join(cfg, "keytwig", "config.toml"),
+		Audit:    filepath.Join(filepath.Dir(v), "audit.jsonl"),
 	}, nil
 }
 

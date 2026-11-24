@@ -27,7 +27,7 @@ type Config struct {
 	Agents map[string]AgentPolicy `toml:"agents"`
 }
 
-// AgentPolicy: glob patterns on secret names (path.Match syntax, e.g. "SABATINO_*").
+// AgentPolicy: glob patterns on secret names (path.Match syntax, e.g. "ACME_*").
 // Empty allow = all; deny wins over allow.
 type AgentPolicy struct {
 	Allow []string `toml:"allow"`

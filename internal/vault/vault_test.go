@@ -189,3 +189,93 @@ func TestMachineMode(t *testing.T) {
 		t.Fatal("value lost")
 	}
 }
+
+func TestIdentityExportAndImport(t *testing.T) {
+	p1 := testPaths(t)
+	if _, err := Init(p1, ModeFile, nil); err != nil {
+		t.Fatal(err)
+	}
+	v1, err := Open(p1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1.Set("SECRET_A", "val-export-123", "test")
+	if err := v1.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	backup := filepath.Join(t.TempDir(), "id.bak")
+	if err := Export(p1, backup); err != nil {
+		t.Fatal(err)
+	}
+
+	// Copy vault to a fresh location without identity, then import in passphrase mode.
+	dir2 := t.TempDir()
+	p2 := Paths{Identity: filepath.Join(dir2, "identity.txt"), Vault: filepath.Join(dir2, "vault.age")}
+	rawVault, err := os.ReadFile(p1.Vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p2.Vault, rawVault, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Invalid file rejected.
+	badFile := filepath.Join(dir2, "bad.txt")
+	_ = os.WriteFile(badFile, []byte("not an age key\n"), 0o600)
+	if err := Import(p2, badFile, ModeFile, nil, false); err == nil {
+		t.Fatal("expected error for invalid identity file")
+	}
+
+	if err := Import(p2, backup, ModePassphrase, []byte("passphrase-123"), false); err != nil {
+		t.Fatal(err)
+	}
+	v2, err := Open(p2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, ok := v2.Get("SECRET_A"); !ok || s.Value != "val-export-123" {
+		t.Fatalf("imported identity could not read vault: %+v", s)
+	}
+
+	// Refuses overwrite without force.
+	if err := Import(p2, backup, ModeFile, nil, false); err == nil {
+		t.Fatal("expected error when identity already exists without force")
+	}
+	// Overwrite with force succeeds.
+	if err := Import(p2, backup, ModeFile, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	st, err := GetStatus(p2)
+	if err != nil || st.Mode != ModeFile {
+		t.Fatalf("expected file mode after forced import, got %+v err=%v", st, err)
+	}
+}
+
+func TestDefaultPathsAuditAndLock(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KEYTWIG_HOME", home)
+	p, err := DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Audit != filepath.Join(home, "audit.jsonl") {
+		t.Fatalf("Audit path = %q", p.Audit)
+	}
+	unlock1, err := Lock(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock1()
+
+	// Calling unlock twice is safe.
+	unlock1()
+	unlock1()
+
+	// After unlock, another Lock succeeds immediately.
+	unlock2, err := Lock(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock2()
+}

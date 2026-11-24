@@ -17,9 +17,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keytwig/keytwig/internal/audit"
 	"github.com/keytwig/keytwig/internal/config"
 	"github.com/keytwig/keytwig/internal/dotenv"
 	"github.com/keytwig/keytwig/internal/runner"
+	"github.com/keytwig/keytwig/internal/scan"
 	"github.com/keytwig/keytwig/internal/vault"
 )
 
@@ -252,9 +254,20 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 		cctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		out := &capped{max: 64 * 1024}
-		code, err := runner.Run(cctx, v, res, runner.Exec{Shell: command, Dir: cwd, Stdin: bytes.NewReader(nil), Stdout: out, Stderr: out})
+		runRes, err := runner.Run(cctx, v, res, runner.Exec{Shell: command, Dir: cwd, Stdin: bytes.NewReader(nil), Stdout: out, Stderr: out})
+		_ = audit.Append(s.Paths.Audit, audit.Event{
+			Time:       time.Now().UTC(),
+			Mode:       "mcp",
+			Agent:      s.Agent,
+			Cwd:        cwd,
+			Command:    audit.RedactCommand(command, v.Values()),
+			Injected:   res.Injected,
+			Denied:     res.Denied,
+			ExitCode:   runRes.ExitCode,
+			Redactions: runRes.Redactions,
+		})
 		var b strings.Builder
-		fmt.Fprintf(&b, "exit code: %d\n", code)
+		fmt.Fprintf(&b, "exit code: %d\n", runRes.ExitCode)
 		if len(res.Injected) > 0 {
 			fmt.Fprintf(&b, "injected: %s\n", strings.Join(res.Injected, ", "))
 		}
@@ -269,7 +282,7 @@ func (s *Server) call(ctx context.Context, name string, args map[string]any) (st
 		}
 		b.WriteString("--- output ---\n")
 		b.WriteString(out.String())
-		return b.String(), code != 0 || err != nil
+		return b.String(), runRes.ExitCode != 0 || err != nil
 	}
 	return "unknown tool: " + name, true
 }
@@ -298,6 +311,19 @@ func (s *Server) resolvePath(p string) string {
 
 // importFile mirrors `keytwig import FILE` (secret-looking names only).
 func (s *Server) importFile(path string) (string, bool) {
+	cfg := s.cfg()
+	home, _ := os.UserHomeDir()
+	opts := scan.Options{Harness: cfg.HarnessPaths(), Ignore: cfg.IgnorePaths(), Home: home}
+	blocked := func(p string) bool {
+		c := scan.Classify(p, opts)
+		return c == scan.ClassHarness || c == scan.ClassBackup
+	}
+	if blocked(path) {
+		return "refusing to import harness/backup file via MCP", true
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != path && blocked(resolved) {
+		return "refusing to import harness/backup file via MCP", true
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err.Error(), true
