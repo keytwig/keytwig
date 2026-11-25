@@ -3,7 +3,7 @@
 > One local age-encrypted vault for the secrets your projects and AI agents use. Agents use secrets through `keytwig run`, which injects values into a child process and masks them in stdout and stderr as `‹keytwig:NAME›`. Single static Go binary (no cgo) for Linux, macOS and Windows. Sibling of memtwig.
 
 ## Key facts
-- Website: https://keytwig.dev
+- Website: https://keytwig.com
 - Repository: https://github.com/keytwig/keytwig
 - Latest release: v0.2.0 (2026-11-24, Apache-2.0): https://github.com/keytwig/keytwig/releases/tag/v0.2.0
 - MCP Registry: io.github.keytwig/keytwig

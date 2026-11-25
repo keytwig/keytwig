@@ -1,6 +1,3 @@
-# Static assets only (no Worker code). Not deployed yet.
-# Custom domain stays off until the domain is chosen (keytwig.dev or keytwig.com):
-# then set it here, in astro.config.mjs (`site`), src/lib/site.ts and public/ (robots, sitemap, llms, _headers, security.txt).
 name = "keytwig-site"
 compatibility_date = "2026-11-01"
 
@@ -9,6 +6,10 @@ directory = "./dist"
 html_handling = "drop-trailing-slash"
 not_found_handling = "404-page"
 
-# [[routes]]
-# pattern = "keytwig.dev"
-# custom_domain = true
+[[routes]]
+pattern = "keytwig.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.keytwig.com"
+custom_domain = true

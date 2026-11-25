@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
 export default defineConfig({
-  site: "https://keytwig.dev",
+  site: "https://keytwig.com",
   output: "static",
   integrations: [react()],
   vite: {

@@ -25,4 +25,4 @@ Allow: /
 User-agent: Applebot-Extended
 Allow: /
 
-Sitemap: https://keytwig.dev/sitemap.xml
+Sitemap: https://keytwig.com/sitemap.xml
